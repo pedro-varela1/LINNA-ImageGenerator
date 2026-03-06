@@ -59,14 +59,16 @@ def main():
     print(f"Patch: lat={lat_min:.4f}..{lat_max:.4f}  lon={lon_min:.4f}..{lon_max:.4f}")
 
     disp_out = prepare_displacement(
-        paths["lola_dem"], lat_min, lat_max, lon_min, lon_max,
+        paths["gld100_dem_dir"], lat_min, lat_max, lon_min, lon_max,
         out_dir, tex.get("disp_patch_size", 512),
+        tex.get("disp_scale_km", 5.0),
+        paths.get("dem_ext", ".TIF"),
     )
 
     color_out = os.path.join(out_dir, "color_patch.png")
     build_color_patch(
         lat_min, lat_max, lon_min, lon_max,
-        color_out, paths["wac_dir"], paths["wac_ext"],
+        color_out, paths["wac_dir"], paths.get("wac_ext", ".TIF"),
         tex.get("color_patch_size", 1024),
     )
 
