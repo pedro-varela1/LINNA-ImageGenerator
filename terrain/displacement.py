@@ -3,13 +3,141 @@ import os
 import json
 import re
 import shutil
+import struct
 import subprocess
 
 import numpy as np
 from PIL import Image
 
 # ---------------------------------------------------------------------------
-# GLD100 tile catalogue
+# Legacy SLDEM2015 / LOLA constants  (use_legacy_dem = true)
+# ---------------------------------------------------------------------------
+
+LOLA_LINES            = 15360
+LOLA_LINE_SAMPLES     = 46080
+LOLA_LAT_MIN          = -60.0
+LOLA_LAT_MAX          =  60.0
+LOLA_LON_MIN          =   0.0
+LOLA_LON_MAX          = 360.0
+LOLA_BYTES_PER_SAMPLE = 4          # 32-bit IEEE float (PC_REAL)
+
+
+def _crop_lola_with_gdal(img_path, lat_min, lat_max, lon_min, lon_max, out_path):
+    """Crop LOLA GeoTIFF with gdal_translate using a manually computed pixel window."""
+    total_lon = LOLA_LON_MAX - LOLA_LON_MIN
+    total_lat = LOLA_LAT_MAX - LOLA_LAT_MIN
+
+    col_off  = int((lon_min - LOLA_LON_MIN) / total_lon * LOLA_LINE_SAMPLES)
+    col_end  = int((lon_max - LOLA_LON_MIN) / total_lon * LOLA_LINE_SAMPLES)
+    col_size = max(1, col_end - col_off)
+
+    row_off  = int((LOLA_LAT_MAX - lat_max) / total_lat * LOLA_LINES)
+    row_end  = int((LOLA_LAT_MAX - lat_min) / total_lat * LOLA_LINES)
+    row_size = max(1, row_end - row_off)
+
+    cmd = [
+        "gdal_translate",
+        "-srcwin", str(col_off), str(row_off), str(col_size), str(row_size),
+        "-of", "GTiff",
+        img_path, out_path,
+    ]
+    print(f"[DISP] Running: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+    print(f"[DISP] Saved -> {out_path}")
+
+
+def _crop_lola_raw(img_path, lat_min, lat_max, lon_min, lon_max,
+                   out_path, out_size=512):
+    """Pure-Python fallback for LOLA .IMG (row-major 32-bit floats)."""
+    print("[DISP] Cropping LOLA IMG via raw binary read (no GDAL) ...")
+
+    total_lat = LOLA_LAT_MAX - LOLA_LAT_MIN
+    total_lon = LOLA_LON_MAX - LOLA_LON_MIN
+    row_bytes = LOLA_LINE_SAMPLES * LOLA_BYTES_PER_SAMPLE
+
+    row_top = int((LOLA_LAT_MAX - lat_max) / total_lat * LOLA_LINES)
+    row_bot = int((LOLA_LAT_MAX - lat_min) / total_lat * LOLA_LINES)
+    col_lft = int((lon_min - LOLA_LON_MIN) / total_lon * LOLA_LINE_SAMPLES)
+    col_rgt = int((lon_max - LOLA_LON_MIN) / total_lon * LOLA_LINE_SAMPLES)
+
+    row_top = max(0, min(row_top, LOLA_LINES - 1))
+    row_bot = max(row_top + 1, min(row_bot, LOLA_LINES))
+    col_lft = max(0, min(col_lft, LOLA_LINE_SAMPLES - 1))
+    col_rgt = max(col_lft + 1, min(col_rgt, LOLA_LINE_SAMPLES))
+
+    n_rows = row_bot - row_top
+    n_cols = col_rgt - col_lft
+    patch  = np.zeros((n_rows, n_cols), dtype=np.float32)
+
+    with open(img_path, "rb") as f:
+        for i, row_idx in enumerate(range(row_top, row_bot)):
+            f.seek(row_idx * row_bytes + col_lft * LOLA_BYTES_PER_SAMPLE)
+            raw = f.read(n_cols * LOLA_BYTES_PER_SAMPLE)
+            patch[i, :] = struct.unpack(f"<{n_cols}f", raw)
+
+    h_min, h_max = float(patch.min()), float(patch.max())
+    if h_max > h_min:
+        patch_norm = (patch - h_min) / (h_max - h_min)
+    else:
+        patch_norm = np.full_like(patch, 0.5)
+
+    patch_u16 = (patch_norm * 65535).astype(np.uint16)
+    img_out   = Image.fromarray(patch_u16, mode="I;16")
+    img_out   = img_out.resize((out_size, out_size), resample=Image.LANCZOS)
+    tif_path  = out_path.replace(".png", ".tif")
+    img_out.save(tif_path)
+    print(f"[DISP] Saved → {tif_path}")
+    return tif_path, h_min, h_max
+
+
+def _prepare_displacement_legacy(lola_img_path, lat_min, lat_max, lon_min, lon_max,
+                                  out_dir, disp_patch_size):
+    """
+    Legacy pipeline: crop SLDEM2015/LOLA .IMG or GeoTIFF with manual pixel
+    arithmetic (gdal_translate -srcwin).  Returns (tif_path, meta_dict).
+    """
+    out_path = os.path.join(out_dir, "disp_patch.tif")
+
+    if shutil.which("gdal_translate"):
+        _crop_lola_with_gdal(lola_img_path, lat_min, lat_max, lon_min, lon_max, out_path)
+        h_min, h_max = _get_lola_min_max(out_path)
+    else:
+        print("[DISP] gdal_translate not found — using raw binary fallback.")
+        out_path, h_min, h_max = _crop_lola_raw(
+            lola_img_path, lat_min, lat_max, lon_min, lon_max,
+            out_path, disp_patch_size,
+        )
+
+    h_mid = (h_max + h_min) / 2.0
+    meta  = {
+        "h_min_km": h_min,
+        "h_max_km": h_max,
+        "h_mid_km": h_mid,
+        "scale":    1.0,
+        "midlevel": h_mid,
+    }
+    return out_path, meta
+
+
+def _get_lola_min_max(tif_path):
+    if shutil.which("gdalinfo"):
+        result = subprocess.run(
+            ["gdalinfo", "-mm", tif_path], capture_output=True, text=True
+        )
+        m = re.search(r"Computed Min/Max=([-\d.]+),([-\d.]+)", result.stdout)
+        if m:
+            h_min, h_max = float(m.group(1)), float(m.group(2))
+            print(f"[DISP] Height range (gdalinfo): {h_min:.3f} .. {h_max:.3f} km")
+            return h_min, h_max
+    arr = np.array(Image.open(tif_path), dtype=np.float32)
+    h_min = float(arr[arr > -9000].min()) if (arr > -9000).any() else -2.0
+    h_max = float(arr[arr > -9000].max()) if (arr > -9000).any() else 2.0
+    print(f"[DISP] Height range (PIL): {h_min:.3f} .. {h_max:.3f} km")
+    return h_min, h_max
+
+
+# ---------------------------------------------------------------------------
+# GLD100 tile catalogue  (use_legacy_dem = false, default)
 # ---------------------------------------------------------------------------
 
 # Equirectangular tiles: suffix → (lat_min, lat_max, lon_min, lon_max)
@@ -145,54 +273,56 @@ def get_disp_min_max(tif_path):
 
 def prepare_displacement(gld100_dir, lat_min, lat_max, lon_min, lon_max,
                          out_dir, disp_patch_size=512, disp_scale_km=5.0,
-                         dem_ext=".TIF"):
+                         dem_ext=".TIF", use_legacy_dem=False,
+                         lola_img_path=None):
     """
-    Crop the GLD100 DEM to the patch using GDAL geotransform and write
-    disp_meta.json for the Blender material.
+    Crop the DEM patch and write disp_meta.json for the Blender material.
 
-    The GLD100 GeoTIFF has the CRS embedded, so GDAL computes every pixel
-    position directly via gdal.ApplyGeoTransform without any manual arithmetic.
-    Polar stereographic tiles (±60°..90°) are reprojected to the equirectangular
-    Moon CRS on the fly by gdalwarp.
-
-    Pixel values are 8-bit (0–255, NoData=0).  Blender normalises them to
-    [0, 1] for the Displacement node:
-        displacement_km = (pixel/255 – midlevel) × scale
-
-    Args:
-        gld100_dir    : directory containing WAC_GLD100_*_100M.TIF tiles
-        disp_scale_km : total height range (km) represented by pixel 0..255
-                        (default 5.0 km; adjust in config texture.disp_scale_km)
-        dem_ext       : tile file extension (default ".TIF")
+    When ``use_legacy_dem=True`` the old SLDEM2015/LOLA pipeline is used:
+        • ``lola_img_path`` must point to the single .IMG or GeoTIFF file
+        • pixel coordinates are computed manually with -srcwin
+        • disp_meta stores real km values (scale=1, midlevel=h_mid_km)
+    When ``use_legacy_dem=False`` (default) the new GLD100 pipeline is used:
+        • ``gld100_dir`` must point to the directory of WAC_GLD100_*_100M.TIF
+        • GDAL reads the embedded CRS geotransform; polar tiles are reprojected
+        • disp_meta stores normalised values (scale=disp_scale_km, midlevel=0..1)
 
     Returns the path to the saved GeoTIFF.
     """
     out_path = os.path.join(out_dir, "disp_patch.tif")
 
-    tile_paths = find_gld100_tiles(
-        lat_min, lat_max, lon_min, lon_max, gld100_dir, dem_ext
-    )
-    crop_gld100_with_gdal(
-        tile_paths, lat_min, lat_max, lon_min, lon_max, out_path, disp_patch_size
-    )
-
-    v_min, v_max = get_disp_min_max(out_path)
-    # Normalised midpoint that maps to zero displacement in Blender
-    n_mid = (v_min + v_max) / 2.0 / 255.0
-
-    meta = {
-        "pixel_min": v_min,
-        "pixel_max": v_max,
-        "scale":     disp_scale_km,
-        "midlevel":  n_mid,
-    }
+    if use_legacy_dem:
+        if not lola_img_path:
+            raise ValueError(
+                "use_legacy_dem=True requires paths.lola_dem to be set in config."
+            )
+        print("[DISP] Using legacy LOLA/SLDEM2015 pipeline")
+        out_path, meta = _prepare_displacement_legacy(
+            lola_img_path, lat_min, lat_max, lon_min, lon_max,
+            out_dir, disp_patch_size,
+        )
+    else:
+        print("[DISP] Using GLD100 pipeline")
+        tile_paths = find_gld100_tiles(
+            lat_min, lat_max, lon_min, lon_max, gld100_dir, dem_ext
+        )
+        crop_gld100_with_gdal(
+            tile_paths, lat_min, lat_max, lon_min, lon_max, out_path, disp_patch_size
+        )
+        v_min, v_max = get_disp_min_max(out_path)
+        n_mid = (v_min + v_max) / 2.0 / 255.0
+        meta = {
+            "pixel_min": v_min,
+            "pixel_max": v_max,
+            "scale":     disp_scale_km,
+            "midlevel":  n_mid,
+        }
+        print(
+            f"[DISP]   pixel=[{v_min:.0f}, {v_max:.0f}]  "
+            f"scale={disp_scale_km} km  midlevel={n_mid:.3f}"
+        )
     meta_path = os.path.join(out_dir, "disp_meta.json")
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
-
     print(f"[DISP] Metadata saved → {meta_path}")
-    print(
-        f"[DISP]   pixel=[{v_min:.0f}, {v_max:.0f}]  "
-        f"scale={disp_scale_km} km  midlevel={n_mid:.3f}"
-    )
     return out_path

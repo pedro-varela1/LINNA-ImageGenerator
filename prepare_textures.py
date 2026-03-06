@@ -63,6 +63,8 @@ def main():
         out_dir, tex.get("disp_patch_size", 512),
         tex.get("disp_scale_km", 5.0),
         paths.get("dem_ext", ".TIF"),
+        use_legacy_dem=tex.get("use_legacy_dem", False),
+        lola_img_path=paths.get("lola_dem"),
     )
 
     color_out = os.path.join(out_dir, "color_patch.png")

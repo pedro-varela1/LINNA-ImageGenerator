@@ -1,8 +1,8 @@
 {
   "camera": {
-    "lat_deg": 10.0,
+    "lat_deg": 20.0,
     "lon_deg": 45.0,
-    "height_km": 100.0,
+    "height_km": 50.0,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
@@ -21,11 +21,13 @@
   "paths": {
     "gld100_dem_dir": "/media/ita/DATA/DEM/TIF_DEM/",
     "dem_ext": ".TIF",
+    "lola_dem": "/media/ita/DATA/Blender-Sim/lunar_dem.tif",
     "wac_dir": "/media/ita/DATA/DEM/TIF_COLOR/",
     "wac_ext": ".TIF",
     "output_dir": "/media/ita/DATA/Blender-Sim/LINNA-ImageGenerator/output"
   },
   "texture": {
+    "use_legacy_dem": false,
     "color_patch_size": 1024,
     "disp_patch_size": 512,
     "disp_scale_km": 5.0
