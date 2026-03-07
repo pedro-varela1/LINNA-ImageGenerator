@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -155,8 +156,9 @@ def render_row(stem, lat, lon, alt_km, base_cfg, out_root,
         return False
 
     # Step 2: Blender render
+    blender_cmd = shlex.split(blender_exe)
     ret = subprocess.run(
-        [blender_exe, "--background",
+        blender_cmd + ["--background",
          "--python", os.path.join(SCRIPT_DIR, "lunar_render.py"),
          "--", "--config", tmp_cfg],
         capture_output=False,

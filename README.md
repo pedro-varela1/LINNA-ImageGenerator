@@ -125,12 +125,12 @@ python3 batch_render.py \
 ```bash
 # One image per minute, first 10 images only (quick test):
 python3 batch_render.py \
-    --input ../real_data/SelenITA_CoordinatesMoon_Commissioning.txt \
-    --interval 60 --limit 10
+    --input ./real_data/SelenITA_CoordinatesMoon_Commissioning.txt \
+    --interval 60 --limit 300
 
 # Full dataset, one image every 5 minutes:
 python3 batch_render.py \
-    --input ../real_data/SelenITA_CoordinatesMoon_Operational_30km.txt \
+    --input ./real_data/SelenITA_CoordinatesMoon_Operational_30km.txt \
     --interval 300 \
     --output output/batch_30km
 ```

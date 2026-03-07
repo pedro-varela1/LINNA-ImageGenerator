@@ -32,7 +32,7 @@ python3 "${SCRIPT_DIR}/prepare_textures.py" --config "${CONFIG}"
 
 echo ""
 echo "[2/2] Running Blender render ..."
-blender --background --python "${SCRIPT_DIR}/lunar_render.py" -- --config "${CONFIG}"
+flatpak run org.blender.Blender --background --python "${SCRIPT_DIR}/lunar_render.py" -- --config "${CONFIG}"
 
 OUTPUT_DIR="$(python3 -c "import json; print(json.load(open('${CONFIG}'))['paths']['output_dir'])")"
 echo ""

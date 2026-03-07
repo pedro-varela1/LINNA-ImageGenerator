@@ -2,7 +2,7 @@
   "camera": {
     "lat_deg": 20.0,
     "lon_deg": 45.0,
-    "height_km": 50.0,
+    "height_km": 20.0,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
@@ -10,7 +10,7 @@
   "sun": {
     "azimuth_deg": 135.0,
     "elevation_deg": 25.0,
-    "strength": 10.0
+    "strength": 5.0
   },
   "render": {
     "width": 512,
@@ -19,17 +19,17 @@
     "use_gpu": true
   },
   "paths": {
-    "gld100_dem_dir": "/media/ita/DATA/DEM/TIF_DEM/",
+    "gld100_dem_dir": "/home/pedro-varela/Documents/TIF_DEM/",
     "dem_ext": ".TIF",
-    "lola_dem": "/media/ita/DATA/Blender-Sim/lunar_dem.tif",
-    "wac_dir": "/media/ita/DATA/DEM/TIF_COLOR/",
+    "lola_dem": "/home/pedro-varela/Documents/bleder_sim/lunar_dem.tif",
+    "wac_dir": "/home/pedro-varela/Documents/TIF_COLOR/",
     "wac_ext": ".TIF",
-    "output_dir": "/media/ita/DATA/Blender-Sim/LINNA-ImageGenerator/output"
+    "output_dir": "/home/pedro-varela/Documents/LINNA-ImageGenerator/output"
   },
   "texture": {
     "use_legacy_dem": false,
-    "color_patch_size": 1024,
-    "disp_patch_size": 512,
-    "disp_scale_km": 5.0
+    "color_patch_size": 4096,
+    "disp_patch_size": 16384,
+    "disp_scale_km": 19.92
   }
 }
