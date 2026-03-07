@@ -34,7 +34,44 @@ MOON_EQC_SRS = (
     "+x_0=0 +y_0=0 +a=1737400 +b=1737400 +units=m +no_defs"
 )
 
+# Explicit PROJ4 overrides for polar tiles whose embedded WKT has
+# AXIS[south,south] / b=0 that confuses PROJ during inverse transforms.
+MOON_POLAR_N_SRS = (
+    "+proj=stere +lat_0=90 +lat_ts=90 +lon_0=0 "
+    "+x_0=0 +y_0=0 +a=1737400 +b=1737400 +units=m +no_defs"
+)
+MOON_POLAR_S_SRS = (
+    "+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 "
+    "+x_0=0 +y_0=0 +a=1737400 +b=1737400 +units=m +no_defs"
+)
+
 _DEG_TO_M = math.pi * 1737400.0 / 180.0
+
+
+def _polar_src_srs(tile_path):
+    """Return explicit source SRS string if tile is polar, else None."""
+    name = os.path.basename(tile_path).upper()
+    if "P900N" in name:
+        return MOON_POLAR_N_SRS
+    if "P900S" in name:
+        return MOON_POLAR_S_SRS
+    return None
+
+
+def _warp_tile(tile_path, src_srs, x_min, y_min, x_max, y_max, size, out_path):
+    """Warp a single tile to equirectangular, overriding source SRS if given."""
+    cmd = ["gdalwarp", "-t_srs", MOON_EQC_SRS]
+    if src_srs:
+        cmd += ["-s_srs", src_srs]
+    cmd += [
+        "-te",        str(x_min), str(y_min), str(x_max), str(y_max),
+        "-ts",        str(size),  str(size),
+        "-r",         "bilinear",
+        "-dstnodata", "0",
+        "-overwrite",
+        tile_path, out_path,
+    ]
+    subprocess.run(cmd, check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -95,18 +132,42 @@ def build_color_patch(lat_min, lat_max, lon_min, lon_max,
     y_max = lat_max * _DEG_TO_M
 
     tmp_tif = out_path.replace(".png", "_tmp.tif")
-    cmd = [
-        "gdalwarp",
-        "-t_srs",    MOON_EQC_SRS,
-        "-te",       str(x_min), str(y_min), str(x_max), str(y_max),
-        "-ts",       str(size),  str(size),
-        "-r",        "bilinear",
-        "-dstnodata", "0",
-        "-overwrite",
-    ] + tile_paths + [tmp_tif]
+    out_dir = os.path.dirname(out_path)
 
-    print(f"[WAC] gdalwarp: {len(tile_paths)} tile(s) → {os.path.basename(tmp_tif)}")
-    subprocess.run(cmd, check=True)
+    # Warp polar tiles individually with an explicit source SRS to work
+    # around broken AXIS/b=0 WKT embedded in the LROC polar GeoTIFFs.
+    warped_paths = []
+    for i, tp in enumerate(tile_paths):
+        src_srs = _polar_src_srs(tp)
+        if src_srs is None:
+            warped_paths.append(tp)           # equirectangular — pass through
+        else:
+            tmp_polar = os.path.join(out_dir, f"_polar_wac_{i}.tif")
+            print(f"[WAC] Pre-warping polar tile: {os.path.basename(tp)}")
+            _warp_tile(tp, src_srs, x_min, y_min, x_max, y_max, size, tmp_polar)
+            warped_paths.append(tmp_polar)
+
+    if len(warped_paths) == 1 and _polar_src_srs(tile_paths[0]):
+        # Already warped to final size — just rename
+        os.replace(warped_paths[0], tmp_tif)
+    else:
+        cmd = [
+            "gdalwarp",
+            "-t_srs",    MOON_EQC_SRS,
+            "-te",       str(x_min), str(y_min), str(x_max), str(y_max),
+            "-ts",       str(size),  str(size),
+            "-r",        "bilinear",
+            "-dstnodata", "0",
+            "-overwrite",
+        ] + warped_paths + [tmp_tif]
+        print(f"[WAC] gdalwarp: {len(warped_paths)} tile(s) → {os.path.basename(tmp_tif)}")
+        subprocess.run(cmd, check=True)
+        # Clean up any pre-warped polar intermediates
+        for i, tp in enumerate(tile_paths):
+            if _polar_src_srs(tp):
+                tmp_polar = os.path.join(out_dir, f"_polar_wac_{i}.tif")
+                if os.path.isfile(tmp_polar):
+                    os.remove(tmp_polar)
 
     # Convert GeoTIFF → plain grayscale PNG (strips geospatial metadata
     # so Blender loads it as a simple image)

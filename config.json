@@ -1,8 +1,8 @@
 {
   "camera": {
-    "lat_deg": 20.0,
-    "lon_deg": 45.0,
-    "height_km": 20.0,
+    "lat_deg": 75.0,
+    "lon_deg": 0.0,
+    "height_km": 50.0,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
