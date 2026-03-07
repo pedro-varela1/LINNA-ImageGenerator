@@ -183,6 +183,11 @@ MOON_POLAR_S_SRS = (
 _DEG_TO_M = math.pi * 1737400.0 / 180.0
 
 
+def _to_proj_lon(lon_deg):
+    """Normalize 0-360 longitude to the -180/180 range used by PROJ EQC."""
+    return ((lon_deg + 180.0) % 360.0) - 180.0
+
+
 def _polar_src_srs(tile_path):
     """Return explicit source SRS string if tile is polar, else None."""
     name = os.path.basename(tile_path).upper()
@@ -193,20 +198,36 @@ def _polar_src_srs(tile_path):
     return None
 
 
-def _warp_tile(tile_path, src_srs, x_min, y_min, x_max, y_max, size, out_path):
-    """Warp a single tile to equirectangular, overriding source SRS if given."""
-    cmd = ["gdalwarp", "-t_srs", MOON_EQC_SRS]
-    if src_srs:
-        cmd += ["-s_srs", src_srs]
-    cmd += [
-        "-te",        str(x_min), str(y_min), str(x_max), str(y_max),
-        "-ts",        str(size),  str(size),
-        "-r",         "bilinear",
-        "-dstnodata", "0",
+def _reproject_polar_to_eqc(tile_path, out_dir):
+    """
+    Reproject a polar stereographic tile to Moon equirectangular at FULL
+    resolution (no clipping).  The result is stored in out_dir so it is
+    reused if the same tile is needed again in the same render session.
+
+    Returns tile_path unchanged for non-polar tiles.
+    """
+    src_srs = _polar_src_srs(tile_path)
+    if src_srs is None:
+        return tile_path   # equirectangular — nothing to do
+
+    cache_name = os.path.splitext(os.path.basename(tile_path))[0] + "_eqc.tif"
+    cache_path = os.path.join(out_dir, cache_name)
+    if os.path.isfile(cache_path):
+        print(f"[DISP] Polar EQC cache hit: {cache_name}")
+        return cache_path
+
+    print(f"[DISP] Reprojecting polar tile → EQC: {os.path.basename(tile_path)}")
+    cmd = [
+        "gdalwarp",
+        "-s_srs",    src_srs,
+        "-t_srs",    MOON_EQC_SRS,
+        "-r",        "bilinear",
+        "-of",       "GTiff",
         "-overwrite",
-        tile_path, out_path,
+        tile_path, cache_path,
     ]
     subprocess.run(cmd, check=True)
+    return cache_path
 
 
 # ---------------------------------------------------------------------------
@@ -251,54 +272,43 @@ def find_gld100_tiles(lat_min, lat_max, lon_min, lon_max, gld100_dir, ext=".TIF"
 def crop_gld100_with_gdal(tile_paths, lat_min, lat_max, lon_min, lon_max,
                           out_path, out_size):
     """
-    Warp and mosaic GLD100 tile(s) to the patch using GDAL geotransform.
+    Mosaic GLD100 tiles into a single patch.
 
-    gdalwarp -t_srs reprojects polar stereographic tiles to the Moon
-    equirectangular CRS automatically.  The -te extent is expressed in
-    equirectangular metres computed via gdal.ApplyGeoTransform-equivalent
-    linear formula (lon/lat × π*R/180).
+    Polar tiles are first fully reprojected to Moon equirectangular (no
+    clipping) so that the final mosaic gdalwarp sees only consistent EQC
+    sources.  This avoids the 'band in the middle' artefact that occurs
+    when a pre-clipped polar tile is mosaiced with a full equirectangular
+    tile.
     """
-    x_min = lon_min * _DEG_TO_M
-    x_max = lon_max * _DEG_TO_M
-    y_min = lat_min * _DEG_TO_M
-    y_max = lat_max * _DEG_TO_M
+    # Normalize lon to -180/180 range: PROJ EQC uses -180/180 internally,
+    # but the caller may pass 0-360 (e.g. lon=307° instead of -53°).
+    lon_min_p = _to_proj_lon(lon_min)
+    lon_max_p = _to_proj_lon(lon_max)
+    if lon_max_p < lon_min_p:       # patch crosses antimeridian
+        lon_max_p += 360.0
+
+    x_min = lon_min_p * _DEG_TO_M
+    x_max = lon_max_p * _DEG_TO_M
+    y_min = lat_min   * _DEG_TO_M
+    y_max = lat_max   * _DEG_TO_M
 
     out_dir = os.path.dirname(out_path)
 
-    # Warp polar tiles individually with an explicit source SRS to work
-    # around broken AXIS/b=0 WKT embedded in the LROC polar GeoTIFFs.
-    warped_paths = []
-    for i, tp in enumerate(tile_paths):
-        src_srs = _polar_src_srs(tp)
-        if src_srs is None:
-            warped_paths.append(tp)           # equirectangular — pass through
-        else:
-            tmp_polar = os.path.join(out_dir, f"_polar_dem_{i}.tif")
-            print(f"[DISP] Pre-warping polar tile: {os.path.basename(tp)}")
-            _warp_tile(tp, src_srs, x_min, y_min, x_max, y_max, out_size, tmp_polar)
-            warped_paths.append(tmp_polar)
+    # Reproject polar tiles to full equirectangular before mosaicing
+    ready_tiles = [_reproject_polar_to_eqc(tp, out_dir) for tp in tile_paths]
 
-    if len(warped_paths) == 1 and _polar_src_srs(tile_paths[0]):
-        # Already warped to final size — just rename
-        os.replace(warped_paths[0], out_path)
-    else:
-        cmd = [
-            "gdalwarp",
-            "-t_srs",    MOON_EQC_SRS,
-            "-te",       str(x_min), str(y_min), str(x_max), str(y_max),
-            "-ts",       str(out_size), str(out_size),
-            "-r",        "bilinear",
-            "-dstnodata", "0",
-            "-overwrite",
-        ] + warped_paths + [out_path]
-        print(f"[DISP] gdalwarp: {len(warped_paths)} tile(s) → {os.path.basename(out_path)}")
-        subprocess.run(cmd, check=True)
-        # Clean up any pre-warped polar intermediates
-        for i, tp in enumerate(tile_paths):
-            if _polar_src_srs(tp):
-                tmp_polar = os.path.join(out_dir, f"_polar_dem_{i}.tif")
-                if os.path.isfile(tmp_polar):
-                    os.remove(tmp_polar)
+    cmd = [
+        "gdalwarp",
+        "-t_srs",     MOON_EQC_SRS,
+        "-te",        str(x_min), str(y_min), str(x_max), str(y_max),
+        "-ts",        str(out_size), str(out_size),
+        "-r",         "bilinear",
+        "-dstnodata", "0",
+        "-overwrite",
+    ] + ready_tiles + [out_path]
+
+    print(f"[DISP] gdalwarp: {len(ready_tiles)} tile(s) → {os.path.basename(out_path)}")
+    subprocess.run(cmd, check=True)
     print(f"[DISP] Saved → {out_path}")
 
 

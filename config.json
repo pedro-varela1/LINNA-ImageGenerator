@@ -1,8 +1,8 @@
 {
   "camera": {
-    "lat_deg": 75.0,
-    "lon_deg": 0.0,
-    "height_km": 50.0,
+    "lat_deg": 86.007,
+    "lon_deg": 307.887,
+    "height_km": 55.769,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
@@ -15,7 +15,7 @@
   "render": {
     "width": 512,
     "height": 512,
-    "samples": 256,
+    "samples": 128,
     "use_gpu": true
   },
   "paths": {
@@ -29,7 +29,7 @@
   "texture": {
     "use_legacy_dem": false,
     "color_patch_size": 4096,
-    "disp_patch_size": 16384,
+    "disp_patch_size": 8192,
     "disp_scale_km": 19.92
   }
 }

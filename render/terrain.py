@@ -4,16 +4,20 @@ import os
 import json
 
 
-def build_terrain_mesh(cam_lat, cam_lon, patch_half_deg):
+def build_terrain_mesh(cam_lat, cam_lon, lat_half, lon_half):
     """
     Create a flat plane whose physical size in km matches the terrain patch.
     UV [0,1] covers the full patch extent.
     Patch bounds are stored as custom properties for reference.
+
+    lat_half and lon_half are kept separate so the mesh is correctly sized
+    near the poles, where 1° of longitude covers far less ground than 1° of
+    latitude.
     """
-    lat_min = cam_lat - patch_half_deg
-    lat_max = cam_lat + patch_half_deg
-    lon_min = cam_lon - patch_half_deg
-    lon_max = cam_lon + patch_half_deg
+    lat_min = cam_lat - lat_half
+    lat_max = cam_lat + lat_half
+    lon_min = cam_lon - lon_half
+    lon_max = cam_lon + lon_half
 
     km_per_deg_lat = math.pi * 1737.4 / 180.0
     km_per_deg_lon = km_per_deg_lat * math.cos(math.radians(cam_lat))

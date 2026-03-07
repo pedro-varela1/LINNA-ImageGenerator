@@ -21,7 +21,7 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO_ROOT)
 
 from utils.config import load_config
-from terrain.patch import compute_patch_half_deg
+from terrain.patch import compute_patch_extents
 from terrain.displacement import prepare_displacement
 from terrain.color import build_color_patch
 
@@ -46,15 +46,16 @@ def main():
     out_dir = paths["output_dir"]
     os.makedirs(out_dir, exist_ok=True)
 
-    patch_half = compute_patch_half_deg(
+    patch_half = compute_patch_extents(
         cam["height_km"], cam["fov_deg"], cam["tilt_deg"], cam["lat_deg"],
         render["width"], render["height"],
     )
+    lat_half, lon_half = patch_half
 
-    lat_min = cam["lat_deg"] - patch_half
-    lat_max = cam["lat_deg"] + patch_half
-    lon_min = cam["lon_deg"] - patch_half
-    lon_max = cam["lon_deg"] + patch_half
+    lat_min = cam["lat_deg"] - lat_half
+    lat_max = cam["lat_deg"] + lat_half
+    lon_min = cam["lon_deg"] - lon_half
+    lon_max = cam["lon_deg"] + lon_half
 
     print(f"Patch: lat={lat_min:.4f}..{lat_max:.4f}  lon={lon_min:.4f}..{lon_max:.4f}")
 

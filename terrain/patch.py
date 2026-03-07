@@ -2,23 +2,19 @@ import math
 from utils.geo import km_per_deg_lat, km_per_deg_lon
 
 
-def compute_patch_half_deg(height_km, fov_deg, tilt_deg, cam_lat_deg,
-                            render_width=1920, render_height=1080, margin=1.5):
+def compute_patch_extents(height_km, fov_deg, tilt_deg, cam_lat_deg,
+                           render_width=1920, render_height=1080, margin=1.5):
     """
-    Return the minimum terrain-patch half-extent in degrees so that the mesh
-    borders stay outside the camera frustum, with a safety margin.
+    Return (lat_half_deg, lon_half_deg) — separate half-extents for lat and lon.
 
-    Args:
-        height_km     : camera altitude above the terrain plane (km)
-        fov_deg       : horizontal FOV in degrees
-        tilt_deg      : off-nadir tilt angle in degrees (0 = nadir)
-        cam_lat_deg   : camera latitude – needed for lon km/deg conversion
-        render_width  : image width  in pixels (used for aspect ratio)
-        render_height : image height in pixels
-        margin        : safety multiplier (1.5 → 50 % extra beyond visible area)
+    Near the poles, lon degrees are physically much shorter than lat degrees,
+    so the two halves diverge significantly.  Using a single value (as done
+    previously) caused a square-in-km patch to appear as a distorted rectangle
+    in the EQC texture, stretching the colour map horizontally.
 
-    Returns:
-        patch_half_deg (float)
+    Caps:
+        lat_half : max 15°  (keeps equatorial patches reasonable)
+        lon_half : max 89°  (allows polar patches to cover the full FOV in km)
     """
     fov_h  = math.radians(fov_deg)
     aspect = render_width / render_height
@@ -38,9 +34,10 @@ def compute_patch_half_deg(height_km, fov_deg, tilt_deg, cam_lat_deg,
 
     kpd_lat = km_per_deg_lat()
     kpd_lon = km_per_deg_lon(cam_lat_deg)
-    patch_half_deg = max_ground_dist_km / min(kpd_lat, kpd_lon)
-    patch_half_deg = max(0.1, min(patch_half_deg, 15.0))
+
+    lat_half = max(0.1, min(max_ground_dist_km / kpd_lat, 15.0))
+    lon_half = max(0.1, min(max_ground_dist_km / kpd_lon, 89.0))
 
     print(f"[Patch] Max visible ground distance: {max_ground_dist_km / margin:.2f} km")
-    print(f"[Patch] Patch half-extent (with {margin}x margin): {patch_half_deg:.3f} deg")
-    return patch_half_deg
+    print(f"[Patch] lat_half={lat_half:.3f} deg  lon_half={lon_half:.3f} deg  (margin={margin}x)")
+    return lat_half, lon_half

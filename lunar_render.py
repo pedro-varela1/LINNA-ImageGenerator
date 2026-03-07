@@ -20,7 +20,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from utils.config import load_config
-from terrain.patch import compute_patch_half_deg
+from terrain.patch import compute_patch_extents
 from render.scene import clear_scene, setup_renderer
 from render.terrain import build_terrain_mesh, build_terrain_material
 from render.camera import place_camera
@@ -65,7 +65,7 @@ def main():
                 f"{label} not found: {path}\n  Run prepare_textures.py first!"
             )
 
-    patch_half = compute_patch_half_deg(
+    lat_half, lon_half = compute_patch_extents(
         cam["height_km"], cam["fov_deg"], cam["tilt_deg"], cam["lat_deg"],
         render["width"], render["height"],
     )
@@ -77,7 +77,7 @@ def main():
     )
 
     print("[Terrain] Building mesh...")
-    plane = build_terrain_mesh(cam["lat_deg"], cam["lon_deg"], patch_half)
+    plane = build_terrain_mesh(cam["lat_deg"], cam["lon_deg"], lat_half, lon_half)
 
     print("[Terrain] Applying material...")
     build_terrain_material(plane, disp_path, color_path, disp_meta)
