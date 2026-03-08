@@ -59,6 +59,7 @@ def parse_args():
                    help="Render every Nth row, e.g. --interval 60 for one frame per minute")
     return p.parse_args()
 
+# Ex.: python batch_render.py --input real_data/SelenITA_CoordinatesMoon_Operational_70km.txt --limit 300 --interval 60 --blender flathub run org.blender.Blender
 
 # ---------------------------------------------------------------------------
 # Legacy DEM coverage check
@@ -184,7 +185,19 @@ def render_row(stem, lat, lon, alt_km, base_cfg, out_root,
     cfg["camera"]["lon_deg"]   = lon
     cfg["camera"]["height_km"] = alt_km
     cfg["paths"]["output_dir"] = row_tmp
-    cfg["texture"]["use_legacy_dem"] = should_use_legacy_dem(cfg)
+
+    force_legacy = base_cfg["texture"].get("use_legacy_dem", False)
+    if force_legacy:
+        # Legacy DEM (LOLA/SLDEM2015) only covers ±60°.
+        # If this frame's patch strays outside that belt, skip it entirely.
+        if not should_use_legacy_dem(cfg):
+            print(f"  [SKIP] lat={lat:.2f} outside ±60° legacy DEM coverage – polar frame skipped")
+            shutil.rmtree(row_tmp, ignore_errors=True)
+            return False
+        cfg["texture"]["use_legacy_dem"] = True
+    else:
+        # Config says GLD100 → use it for every frame, no restriction.
+        cfg["texture"]["use_legacy_dem"] = False
 
     tmp_cfg = os.path.join(row_tmp, "config.json")
     with open(tmp_cfg, "w") as f:
