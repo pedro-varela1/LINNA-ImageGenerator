@@ -26,6 +26,9 @@ def setup_renderer(render_width, render_height, render_samples,
     scene.render.image_settings.file_format  = "PNG"
     scene.render.image_settings.color_depth  = "16"
 
+    scene.view_settings.view_transform = "Filmic"
+    # scene.view_settings.exposure       = 10.0
+
     if use_gpu:
         prefs = bpy.context.preferences.addons["cycles"].preferences
         prefs.refresh_devices()

@@ -10,7 +10,7 @@
   "sun": {
     "azimuth_deg": 135.0,
     "elevation_deg": 25.0,
-    "strength": 5.0
+    "strength": 10.0
   },
   "render": {
     "width": 512,
