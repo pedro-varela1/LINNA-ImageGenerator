@@ -9,7 +9,7 @@
   },
   "sun": {
     "azimuth_deg": 248.0,
-    "elevation_deg": 41.0,
+    "elevation_deg": 10.0,
     "strength": 10.0
   },
   "render": {
@@ -27,7 +27,7 @@
     "output_dir": "/home/pedro-varela/Documents/LINNA-ImageGenerator/output"
   },
   "texture": {
-    "use_legacy_dem": false,
+    "use_legacy_dem": true,
     "color_patch_size": 4096,
     "disp_patch_size": 8192,
     "disp_scale_km": 19.92
