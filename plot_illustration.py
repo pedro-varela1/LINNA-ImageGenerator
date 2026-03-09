@@ -189,76 +189,99 @@ def _draw_cross_section(ax, R, h, half_ang_deg, label_p, label_m, title, ext_km,
 def _render_sphere_image(size, center_lat_deg, center_lon_deg,
                           lat_min_deg, lat_max_deg, lon_min_deg, lon_max_deg):
     """
-    Ray-cast a Lambertian-shaded Moon sphere (RGBA float32 array).
-    Pixels inside the lat/lon coverage region are highlighted in orange.
-    Row-0 = North (top), col-0 = West (left) — orthographic view.
+    Ray-cast a shaded Moon sphere with two-hemisphere compositing.
 
-    The camera is fixed at lat=0 (equator) and lon=center_lon so that
-    the coverage patch appears at its real geographic position on the
-    sphere disk (offset from centre by the actual latitude).
+    * Front hemisphere: Lambertian shading + orange patch if in coverage.
+    * Back hemisphere:  coverage patch glows through as a dim translucent
+                        halo (Porter-Duff: back layer ∘ semi-transparent front).
+    * The sphere is semi-transparent (alpha ≈ 0.82) so back-side patches
+      are always visible regardless of their longitude.
+
+    Camera fixed at lat=0, lon=0 — the patch appears at its true
+    geographic position: horizontal ↔ longitude, vertical ↕ latitude.
     """
     y_i, x_i = np.mgrid[0:size, 0:size]
     half = (size - 1) / 2.0
     sx =  (x_i - half) / half       # East:  +1 = right
-    sy =  (half - y_i) / half       # North: +1 = top  (flip row index)
+    sy =  (half - y_i) / half       # North: +1 = top
     r2 = sx ** 2 + sy ** 2
     on_sphere = r2 <= 1.0
-    sz = np.sqrt(np.where(on_sphere, 1.0 - r2, 0.0))   # front-facing hemisphere
+    sz_f =  np.sqrt(np.where(on_sphere, 1.0 - r2, 0.0))  # front (+z)
+    sz_b = -sz_f                                           # back  (-z)
 
-    # Fixed camera at equator, same longitude as coverage centre.
-    # This places the orange patch at the correct latitude on the sphere disk.
-    clat = 0.0                          # always look from equator
-    clon = np.radians(center_lon_deg)
-    ccla, scla = np.cos(clat), np.sin(clat)
-    cclo, sclo = np.cos(clon), np.sin(clon)
-    ex = np.array([-sclo,          cclo,          0.0   ])   # East
-    nx = np.array([-scla * cclo,  -scla * sclo,   ccla  ])   # North
-    zx = np.array([ ccla * cclo,   ccla * sclo,   scla  ])   # Radial (toward viewer)
+    # Camera at lat=0, lon=0  →  ex=[0,1,0]  nx=[0,0,1]  zx=[1,0,0]
+    # (simple identity-like basis, avoids re-deriving the full rotation)
+    def _latlon(sz):
+        Px = sz          # zx component
+        Py = sx          # ex component
+        Pz = sy          # nx component
+        lat = np.degrees(np.arcsin(np.clip(Pz, -1.0, 1.0)))
+        lon = np.degrees(np.arctan2(Py, Px)) % 360.0
+        return lat, lon
 
-    # 3-D point on unit sphere in MCMF
-    Px = sx * ex[0] + sy * nx[0] + sz * zx[0]
-    Py = sx * ex[1] + sy * nx[1] + sz * zx[1]
-    Pz = sx * ex[2] + sy * nx[2] + sz * zx[2]
+    def _in_cov(lat_px, lon_px):
+        lmin = lon_min_deg % 360.0
+        lmax = lon_max_deg % 360.0
+        if lmax >= lmin:
+            lon_ok = (lon_px >= lmin) & (lon_px <= lmax)
+        else:
+            lon_ok = (lon_px >= lmin) | (lon_px <= lmax)
+        return (lat_px >= lat_min_deg) & (lat_px <= lat_max_deg) & lon_ok
 
-    # Geographic coordinates of each pixel
-    lat_px = np.degrees(np.arcsin(np.clip(Pz, -1.0, 1.0)))
-    lon_px = np.degrees(np.arctan2(Py, Px)) % 360.0
+    lat_f, lon_f = _latlon(sz_f)
+    lat_b, lon_b = _latlon(sz_b)
 
-    # Coverage mask — handle possible lon wrap
-    lmin = lon_min_deg % 360.0
-    lmax = lon_max_deg % 360.0
-    if lmax >= lmin:
-        lon_in = (lon_px >= lmin) & (lon_px <= lmax)
-    else:
-        lon_in = (lon_px >= lmin) | (lon_px <= lmax)
-    in_cov = on_sphere & (lat_px >= lat_min_deg) & (lat_px <= lat_max_deg) & lon_in
+    in_cov_f = on_sphere & _in_cov(lat_f, lon_f)
+    in_cov_b = on_sphere & _in_cov(lat_b, lon_b)
 
-    # Lambertian shading: sun from upper-left-front (in camera frame)
+    # ── Lambertian shading (front face only) ──────────────────────────────
     sun = np.array([-0.40, 0.55, 0.73])
     sun /= np.linalg.norm(sun)
-    diffuse = np.clip(sx * sun[0] + sy * sun[1] + sz * sun[2], 0.0, 1.0)
+    diffuse  = np.clip(sx * sun[0] + sy * sun[1] + sz_f * sun[2], 0.0, 1.0)
     intensity = 0.18 + 0.82 * diffuse
 
-    rgba = np.zeros((size, size, 4), dtype=np.float32)
-    # Moon base: dark blue-grey
+    # ── Back layer: dim orange glow for back-hemisphere coverage ──────────
+    # This layer composites BEHIND the front sphere.
+    SPHERE_ALPHA = 0.82   # front sphere transparency (1 = fully opaque)
+    BACK_ALPHA   = 0.50   # opacity of the back-side patch glow
+    back_rgb  = np.zeros((size, size, 3), dtype=np.float32)
+    back_a    = np.zeros((size, size),    dtype=np.float32)
+    back_rgb[in_cov_b] = [0.90, 0.38, 0.05]
+    back_a[in_cov_b]   = BACK_ALPHA
+
+    # ── Front layer: shaded sphere ────────────────────────────────────────
     mr, mg, mb = 0.28, 0.29, 0.36
-    rgba[on_sphere, 0] = mr * intensity[on_sphere]
-    rgba[on_sphere, 1] = mg * intensity[on_sphere]
-    rgba[on_sphere, 2] = mb * intensity[on_sphere]
-    rgba[on_sphere, 3] = 1.0
-    # Coverage highlight: orange blended with shading
+    front_rgb = np.zeros((size, size, 3), dtype=np.float32)
+    front_a   = np.zeros((size, size),    dtype=np.float32)
+    front_rgb[on_sphere, 0] = mr * intensity[on_sphere]
+    front_rgb[on_sphere, 1] = mg * intensity[on_sphere]
+    front_rgb[on_sphere, 2] = mb * intensity[on_sphere]
+    front_a[on_sphere]      = SPHERE_ALPHA
+    # Front coverage: orange blended with shading
     blend = 0.65
-    rgba[in_cov, 0] = blend * 1.00 + (1 - blend) * mr * intensity[in_cov]
-    rgba[in_cov, 1] = blend * 0.47 + (1 - blend) * mg * intensity[in_cov]
-    rgba[in_cov, 2] = blend * 0.10 + (1 - blend) * mb * intensity[in_cov]
-    rgba[in_cov, 3] = 1.0
+    front_rgb[in_cov_f, 0] = blend * 1.00 + (1 - blend) * mr * intensity[in_cov_f]
+    front_rgb[in_cov_f, 1] = blend * 0.47 + (1 - blend) * mg * intensity[in_cov_f]
+    front_rgb[in_cov_f, 2] = blend * 0.10 + (1 - blend) * mb * intensity[in_cov_f]
+
+    # ── Porter-Duff composite: front OVER back ────────────────────────────
+    # alpha_out = a_f + a_b*(1 - a_f)
+    # rgb_out   = (a_f*rgb_f + a_b*(1-a_f)*rgb_b) / alpha_out
+    fa = front_a[:, :, np.newaxis]
+    ba = back_a[:, :, np.newaxis]
+    alpha_out = front_a + back_a * (1.0 - front_a)          # (H,W)
+    safe_a    = np.where(alpha_out > 0, alpha_out, 1.0)[:, :, np.newaxis]
+    rgb_out   = (fa * front_rgb + ba * (1.0 - fa) * back_rgb) / safe_a
+
+    rgba = np.zeros((size, size, 4), dtype=np.float32)
+    rgba[:, :, :3] = np.clip(rgb_out, 0.0, 1.0)
+    rgba[:, :,  3] = np.clip(alpha_out, 0.0, 1.0)
     return rgba
 
 
 def _draw_context_inset(ax, R, h, alpha, arc_x, arc_y, sat,
                          center_lat, center_lon, lat_min, lat_max, lon_min, lon_max):
     # Upper-right corner
-    ax_in = ax.inset_axes([0.74, 0.73, 0.25, 0.25])
+    ax_in = ax.inset_axes([0.62, 0.62, 0.37, 0.37])
     ax_in.set_facecolor(SPACE_BG)
     ax_in.set_aspect("equal")
     ax_in.axis("off")
