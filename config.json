@@ -1,15 +1,15 @@
 {
   "camera": {
-    "lat_deg": 86.007,
-    "lon_deg": 307.887,
-    "height_km": 55.769,
+    "lat_deg": 60.749,
+    "lon_deg": 325.907,
+    "height_km": 54.851,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
   },
   "sun": {
-    "azimuth_deg": 135.0,
-    "elevation_deg": 25.0,
+    "azimuth_deg": 248.0,
+    "elevation_deg": 41.0,
     "strength": 10.0
   },
   "render": {
@@ -27,7 +27,7 @@
     "output_dir": "/home/pedro-varela/Documents/LINNA-ImageGenerator/output"
   },
   "texture": {
-    "use_legacy_dem": true,
+    "use_legacy_dem": false,
     "color_patch_size": 4096,
     "disp_patch_size": 8192,
     "disp_scale_km": 19.92

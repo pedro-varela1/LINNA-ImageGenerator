@@ -1,40 +1,115 @@
 import bpy
+import bmesh
 import math
 import os
 import json
 
+import numpy as np
+
+from utils.sphere import MOON_RADIUS_KM, local_frame
+
+
+# Number of grid divisions along each axis of the spherical cap mesh.
+# 64×64 = 4096 quads — fine enough for subdivision + displacement.
+_GRID_DIV = 64
+
 
 def build_terrain_mesh(cam_lat, cam_lon, lat_half, lon_half):
     """
-    Create a flat plane whose physical size in km matches the terrain patch.
-    UV [0,1] covers the full patch extent.
-    Patch bounds are stored as custom properties for reference.
+    Create a spherical-cap mesh whose vertices lie on the Moon's surface,
+    centred at the nadir point (cam_lat, cam_lon).
 
-    lat_half and lon_half are kept separate so the mesh is correctly sized
-    near the poles, where 1° of longitude covers far less ground than 1° of
-    latitude.
+    The local coordinate frame is:
+        X = East,  Y = North,  Z = Up (radially outward)
+    The camera sits at (0, 0, cam_height_km) in this frame.
+
+    UV [0,1]×[0,1] maps the (lat_min..lat_max) × (lon_min..lon_max) patch
+    exactly as in the old flat-plane pipeline, so textures are unchanged.
+
+    Patch bounds are stored as custom properties for reference.
     """
     lat_min = cam_lat - lat_half
     lat_max = cam_lat + lat_half
     lon_min = cam_lon - lon_half
     lon_max = cam_lon + lon_half
 
-    km_per_deg_lat = math.pi * 1737.4 / 180.0
-    km_per_deg_lon = km_per_deg_lat * math.cos(math.radians(cam_lat))
-    size_x = (lon_max - lon_min) * km_per_deg_lon
-    size_y = (lat_max - lat_min) * km_per_deg_lat
+    R_frame, nadir_mcmf = local_frame(cam_lat, cam_lon)
 
-    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0))
-    plane = bpy.context.active_object
-    plane.name    = "LunarTerrain"
-    plane.scale   = (size_x, size_y, 1)
-    bpy.ops.object.transform_apply(scale=True)
+    n = _GRID_DIV + 1          # vertices per side
+    lats = np.linspace(lat_min, lat_max, n)
+    lons = np.linspace(lon_min, lon_max, n)
 
-    plane["patch_lat_min"] = lat_min
-    plane["patch_lat_max"] = lat_max
-    plane["patch_lon_min"] = lon_min
-    plane["patch_lon_max"] = lon_max
-    return plane
+    # Build vertex positions on the sphere
+    lat_g, lon_g = np.meshgrid(lats, lons, indexing="ij")  # (n, n)
+    lat_r = np.radians(lat_g)
+    lon_r = np.radians(lon_g)
+
+    # MCMF Cartesian
+    P_mcmf = MOON_RADIUS_KM * np.stack([
+        np.cos(lat_r) * np.cos(lon_r),
+        np.cos(lat_r) * np.sin(lon_r),
+        np.sin(lat_r),
+    ], axis=-1)  # (n, n, 3)
+
+    # Transform to local scene frame
+    delta = P_mcmf - nadir_mcmf  # (n, n, 3)
+    P_local = delta @ R_frame    # (n, n, 3)  — R_frame columns are [E,N,U]
+
+    # UV coordinates:
+    #   U = longitude fraction  (follows j-axis)
+    #   V = latitude  fraction  (follows i-axis)
+    # With indexing="ij": meshgrid(lat_fracs, lon_fracs) → first output varies
+    # with i (lat), second varies with j (lon).
+    lat_fracs = np.linspace(0.0, 1.0, n)
+    lon_fracs = np.linspace(0.0, 1.0, n)
+    v_g, u_g = np.meshgrid(lat_fracs, lon_fracs, indexing="ij")
+    # v_g[i,j] = lat_fracs[i]  → V increases with latitude  ✓
+    # u_g[i,j] = lon_fracs[j]  → U increases with longitude ✓
+
+    # Build mesh with BMesh
+    me = bpy.data.meshes.new("LunarTerrainMesh")
+    bm = bmesh.new()
+    uv_layer = bm.loops.layers.uv.new("UVMap")
+
+    # Create all vertices
+    verts = np.empty((n, n), dtype=object)
+    for i in range(n):
+        for j in range(n):
+            x, y, z = P_local[i, j]
+            verts[i, j] = bm.verts.new((x, y, z))
+
+    bm.verts.ensure_lookup_table()
+
+    # Create quads and assign UVs
+    for i in range(_GRID_DIV):
+        for j in range(_GRID_DIV):
+            v00 = verts[i,   j  ]
+            v10 = verts[i+1, j  ]
+            v11 = verts[i+1, j+1]
+            v01 = verts[i,   j+1]
+            face = bm.faces.new([v00, v10, v11, v01])
+            uvs = [
+                (u_g[i,   j  ], v_g[i,   j  ]),
+                (u_g[i+1, j  ], v_g[i+1, j  ]),
+                (u_g[i+1, j+1], v_g[i+1, j+1]),
+                (u_g[i,   j+1], v_g[i,   j+1]),
+            ]
+            for loop, uv in zip(face.loops, uvs):
+                loop[uv_layer].uv = uv
+
+    bm.to_mesh(me)
+    bm.free()
+
+    obj = bpy.data.objects.new("LunarTerrain", me)
+    bpy.context.scene.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+
+    obj["patch_lat_min"] = lat_min
+    obj["patch_lat_max"] = lat_max
+    obj["patch_lon_min"] = lon_min
+    obj["patch_lon_max"] = lon_max
+    return obj
 
 
 def build_terrain_material(plane, disp_path, color_path, disp_meta_path):
@@ -90,10 +165,10 @@ def build_terrain_material(plane, disp_path, color_path, disp_meta_path):
     else:
         print("[Material] disp_meta.json not found — using fallback scale=1.0, midlevel=0.0")
 
-    # Path 1: geometry displacement
+    # Path 1: geometry displacement  (along vertex normals — radially outward)
     disp_node          = nodes.new("ShaderNodeDisplacement")
     disp_node.location = (600, -300)
-    disp_node.space    = "WORLD"    # absolute km units
+    disp_node.space    = "OBJECT"   # normals are radial, not all parallel to Z
     disp_node.inputs["Scale"].default_value    = disp_scale
     disp_node.inputs["Midlevel"].default_value = disp_midlevel
     links.new(disp_tex.outputs["Color"],         disp_node.inputs["Height"])

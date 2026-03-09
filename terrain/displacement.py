@@ -163,6 +163,7 @@ from terrain.gdal_helpers import (
     MOON_EQC_SRS, DEG_TO_M,
     to_proj_lon as _to_proj_lon,
     reproject_polar_to_eqc as _reproject_polar_to_eqc_base,
+    smooth_tile_seam as _smooth_tile_seam,
 )
 
 
@@ -220,11 +221,14 @@ def crop_gld100_with_gdal(tile_paths, lat_min, lat_max, lon_min, lon_max,
     when a pre-clipped polar tile is mosaiced with a full equirectangular
     tile.
     """
-    # Normalize lon to -180/180 range: PROJ EQC uses -180/180 internally,
-    # but the caller may pass 0-360 (e.g. lon=307° instead of -53°).
-    lon_min_p = _to_proj_lon(lon_min)
-    lon_max_p = _to_proj_lon(lon_max)
-    if lon_max_p < lon_min_p:       # patch crosses antimeridian
+    # Use lon directly in 0-360 range (do NOT normalise to -180/180).
+    # Equatorial tiles have x = lon_deg × DEG_TO_M in 0-360 range, and
+    # polar tiles are reprojected to the same 0-360 EQC range by
+    # reproject_polar_to_eqc.  Normalising to -180/180 would shift the
+    # requested -te outside the tile's x-extent → all-zero output.
+    lon_min_p = lon_min % 360.0
+    lon_max_p = lon_max % 360.0
+    if lon_max_p < lon_min_p:       # patch crosses 0°/360° line
         lon_max_p += 360.0
 
     x_min = lon_min_p * DEG_TO_M
@@ -250,6 +254,18 @@ def crop_gld100_with_gdal(tile_paths, lat_min, lat_max, lon_min, lon_max,
     print(f"[DISP] gdalwarp: {len(ready_tiles)} tile(s) → {os.path.basename(out_path)}")
     subprocess.run(cmd, check=True)
     print(f"[DISP] Saved → {out_path}")
+
+    # Sanity-check: gdalwarp succeeds even when -te falls outside all source
+    # tiles, producing an all-zero (NoData) image.
+    _check = np.array(Image.open(out_path))
+    if _check.max() == 0:
+        raise ValueError(
+            f"[DISP] displacement patch is all zeros — patch extent "
+            f"lon=[{lon_min_p:.2f},{lon_max_p:.2f}] lat=[{lat_min:.2f},{lat_max:.2f}] "
+            f"does not overlap any tile."
+        )
+
+    _smooth_tile_seam(out_path, lat_min, lat_max, out_size, label="DISP")
 
 
 # ---------------------------------------------------------------------------
