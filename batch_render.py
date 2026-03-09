@@ -37,6 +37,9 @@ import tempfile
 from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+
+from utils.geo import km_per_deg_lat, normalize_lon
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +68,6 @@ def parse_args():
 # Legacy DEM coverage check
 # ---------------------------------------------------------------------------
 
-_MOON_RADIUS_KM   = 1737.4
 _LEGACY_LAT_LIMIT = 60.0   # LOLA/SLDEM2015 only covers ±60°
 
 
@@ -83,7 +85,7 @@ def _lat_half_deg(lat_deg, height_km, fov_deg, tilt_deg, width, height,
         max_ground_dist_km = height_km * math.tan(max_angle)
     half_fov_h = height_km / math.cos(max_angle) * math.tan(fov_h / 2.0)
     max_ground_dist_km = math.sqrt(max_ground_dist_km**2 + half_fov_h**2) * margin
-    kpd_lat = math.pi * _MOON_RADIUS_KM / 180.0
+    kpd_lat = km_per_deg_lat()
     return max(0.1, min(max_ground_dist_km / kpd_lat, 15.0))
 
 
@@ -123,11 +125,6 @@ def timestamp_to_filename(time_str):
     """
     dt = datetime.strptime(time_str.strip(), "%d %b %Y %H:%M:%S.%f")
     return dt.strftime("%H_%M_%S-%Y%m%d")
-
-
-def normalize_lon(lon_deg):
-    """Map any longitude to [0, 360)."""
-    return lon_deg % 360.0
 
 
 def iter_rows(txt_path):
@@ -259,8 +256,20 @@ def main():
         base_cfg = json.load(f)
 
     # Resolve output root
+    input_stem = os.path.splitext(os.path.basename(args.input))[0]
+    label      = input_stem.rsplit("_", 1)[-1]   # e.g. "70km" from "..._70km"
+    sun        = base_cfg["sun"]
+    fov        = base_cfg["camera"]["fov_deg"]
+    dem_label  = "SLDEM" if base_cfg["texture"].get("use_legacy_dem", False) else "GLD100"
+    auto_name  = (
+        f"{label}"
+        f"_SunAz{sun['azimuth_deg']}"
+        f"_SunInc{sun['elevation_deg']}"
+        f"_FOV{fov}"
+        f"_{dem_label}"
+    )
     out_root = args.output or os.path.join(
-        base_cfg["paths"]["output_dir"], "batch"
+        base_cfg["paths"]["output_dir"], "batch", auto_name
     )
     for sub in ("img", "json", "npz"):
         os.makedirs(os.path.join(out_root, sub), exist_ok=True)

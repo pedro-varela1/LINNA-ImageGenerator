@@ -15,7 +15,7 @@
   "render": {
     "width": 512,
     "height": 512,
-    "samples": 128,
+    "samples": 256,
     "use_gpu": true
   },
   "paths": {

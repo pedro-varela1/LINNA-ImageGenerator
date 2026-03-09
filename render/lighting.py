@@ -1,6 +1,5 @@
 import bpy
 import math
-import mathutils
 from mathutils import Vector
 
 
@@ -13,7 +12,7 @@ def place_sun(azimuth_deg, elevation_deg, strength):
     """
     light_data        = bpy.data.lights.new(name="Sun", type="SUN")
     light_data.energy = strength
-    light_data.angle  = math.radians(0.5)   # realistic solar angular diameter
+    light_data.angle  = math.radians(0.53)   # realistic solar angular diameter
 
     light_obj = bpy.data.objects.new("Sun", light_data)
     bpy.context.scene.collection.objects.link(light_obj)
@@ -24,7 +23,7 @@ def place_sun(azimuth_deg, elevation_deg, strength):
     sy =  math.cos(az) * math.cos(el)
     sz =  math.sin(el)
 
-    sun_dir = mathutils.Vector((-sx, -sy, -sz))
+    sun_dir = Vector((-sx, -sy, -sz))
     light_obj.rotation_euler = sun_dir.to_track_quat("-Z", "Y").to_euler()
     light_obj.location       = Vector((sx * 1000, sy * 1000, sz * 1000))
 
