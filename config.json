@@ -1,8 +1,8 @@
 {
   "camera": {
-    "lat_deg": 60.749,
-    "lon_deg": 325.907,
-    "height_km": 54.851,
+    "lat_deg": 13.539,
+    "lon_deg": 135.602,
+    "height_km": 74.960727,
     "fov_deg": 120.0,
     "tilt_deg": 0.0,
     "azimuth_deg": 0.0
@@ -29,7 +29,7 @@
   "texture": {
     "use_legacy_dem": true,
     "color_patch_size": 4096,
-    "disp_patch_size": 8192,
+    "disp_patch_size": 4096,
     "disp_scale_km": 19.92
   }
 }
