@@ -35,9 +35,9 @@ import matplotlib.patches as mpatches
 import numpy as np
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
 
-MOON_RADIUS_KM = 1737.4
-KM_PER_DEG_LAT = np.pi * MOON_RADIUS_KM / 180.0
+from utils.geo import MOON_RADIUS_KM, KM_PER_DEG_LAT, km_per_deg_lon  # noqa: E402
 
 # ── Colour palette ──────────────────────────────────────────────────────────
 SPACE_BG   = "#0b0d1c"
@@ -49,12 +49,6 @@ SAT_COLOR  = "#ffe033"
 TEXT_COL   = "#ffffff"
 DIM_COL    = "#778899"
 PANEL_BG   = "#10121f"
-
-
-# ── Geometry helpers ─────────────────────────────────────────────────────────
-
-def km_per_deg_lon(lat_deg: float) -> float:
-    return KM_PER_DEG_LAT * abs(np.cos(np.radians(lat_deg)))
 
 
 # ── Coordinates-file parser (for per-frame heights) ─────────────────────────

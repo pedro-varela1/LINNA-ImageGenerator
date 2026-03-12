@@ -39,7 +39,7 @@ from datetime import datetime
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-from utils.geo import km_per_deg_lat, normalize_lon
+from utils.geo import km_per_deg_lat, normalize_lon, lat_patch_half_deg
 
 
 # ---------------------------------------------------------------------------
@@ -71,24 +71,6 @@ def parse_args():
 _LEGACY_LAT_LIMIT = 60.0   # LOLA/SLDEM2015 only covers ±60°
 
 
-def _lat_half_deg(lat_deg, height_km, fov_deg, tilt_deg, width, height,
-                  margin=1.5):
-    """Compute lat patch half-extent in degrees (lon not needed for DEM check)."""
-    fov_h  = math.radians(fov_deg)
-    aspect = width / height
-    fov_v  = 2.0 * math.atan(math.tan(fov_h / 2.0) / aspect)
-    tilt_r = math.radians(tilt_deg)
-    max_angle = tilt_r + fov_v / 2.0
-    if max_angle >= math.radians(89.9):
-        max_ground_dist_km = height_km * math.tan(math.radians(89.0))
-    else:
-        max_ground_dist_km = height_km * math.tan(max_angle)
-    half_fov_h = height_km / math.cos(max_angle) * math.tan(fov_h / 2.0)
-    max_ground_dist_km = math.sqrt(max_ground_dist_km**2 + half_fov_h**2) * margin
-    kpd_lat = km_per_deg_lat()
-    return max(0.1, min(max_ground_dist_km / kpd_lat, 15.0))
-
-
 def should_use_legacy_dem(cfg):
     """
     Return True only when the full lat patch lies within ±60°.
@@ -96,7 +78,7 @@ def should_use_legacy_dem(cfg):
     """
     cam  = cfg["camera"]
     rend = cfg["render"]
-    half = _lat_half_deg(
+    half = lat_patch_half_deg(
         cam["lat_deg"], cam["height_km"], cam["fov_deg"],
         cam.get("tilt_deg", 0.0), rend["width"], rend["height"],
     )

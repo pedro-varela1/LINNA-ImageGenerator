@@ -7,48 +7,44 @@ Photorealistic Blender simulation of the lunar surface from orbital or low-altit
 | Dataset | Description | Source |
 |---|---|---|
 | SLDEM2015 / LOLA | Elevation DEM (GeoTIFF) | [LOLA PDS](https://ode.rsl.wustl.edu/moon/) |
-| WAC Hapke 3-band | Colour tiles (8 tiles, 90°×70° each) | [LROC WAC PDS](https://wms.lroc.asu.edu/lroc) |
+| WAC Hapke 3-band | Colour tiles (8 tiles, 90\u00b0\u00d770\u00b0 each) | [LROC WAC PDS](https://wms.lroc.asu.edu/lroc) |
 
-Place the DEM at the path set in `config.json → paths.lola_dem` and the WAC tiles in `paths.wac_dir`.
+Place the DEM at the path in `config.json \u2192 paths.lola_dem` and the WAC tiles in `paths.wac_dir`.
 
-> **Longitude convention:** both datasets use **0–360°E**. If you have a negative longitude, convert it: `lon_0360 = lon + 360`.
+> **Longitude convention:** both datasets use **0\u2013360\u00b0E**. Convert negative longitudes: `lon_0360 = lon + 360`.
 
 ---
 
 ## Project structure
 
 ```
-python_files/
-├── config.json              ← all parameters live here
-├── run.sh                   ← one-command pipeline
-├── prepare_textures.py      ← step 1: crop DEM + stitch colour map
-├── lunar_render.py          ← step 2: Blender scene + render
-│
-├── terrain/                 ← texture-preparation logic (system Python)
-│   ├── patch.py             ← compute terrain patch size from camera params
-│   ├── displacement.py      ← crop LOLA DEM, write disp_meta.json
-│   └── color.py             ← stitch WAC Hapke tiles into color_patch.png
-│
-├── render/                  ← Blender scene logic (Blender Python)
-│   ├── scene.py             ← clear_scene(), setup_renderer()
-│   ├── terrain.py           ← build_terrain_mesh(), build_terrain_material()
-│   ├── camera.py            ← place_camera()
-│   ├── lighting.py          ← place_sun()
-│   └── latlon.py            ← per-pixel lat/lon map
-│
-├── utils/
-│   ├── geo.py               ← Moon geometry constants & helpers
-│   └── config.py            ← load_config()
-│
-├── batch_render.py          ← iterate a SelenITA coordinates file and render all frames
-│
-└── output/                  ← generated files (created automatically)
-    ├── disp_patch.tif
-    ├── disp_meta.json
-    ├── color_patch.png
-    ├── lunar_render.png
-    ├── lunar_render_latlon.json
-    └── lunar_render_latlon.npz
+\u251c\u2500\u2500 config.json              \u2190 all parameters
+\u251c\u2500\u2500 run.sh                   \u2190 one-command pipeline
+\u251c\u2500\u2500 prepare_textures.py      \u2190 step 1: crop DEM + stitch colour map
+\u251c\u2500\u2500 lunar_render.py          \u2190 step 2: Blender scene + render
+\u251c\u2500\u2500 batch_render.py          \u2190 render all frames from a SelenITA trajectory file
+\u251c\u2500\u2500 random_render.py         \u2190 render N images with randomised orbital/solar parameters
+\u251c\u2500\u2500 annotate_craters.py      \u2190 overlay crater circles on a batch output folder
+\u251c\u2500\u2500 plot_frames.py           \u2190 generate two-panel figures (sphere context + rendered image)
+\u251c\u2500\u2500 plot_illustration.py     \u2190 generate orbital geometry illustrations per frame
+\u251c\u2500\u2500 make_video.py            \u2190 assemble frames/ PNGs into an MP4 timelapse
+\u2502
+\u251c\u2500\u2500 terrain/                 \u2190 texture-preparation modules (system Python)
+\u2502   \u251c\u2500\u2500 patch.py             \u2190 terrain patch extents from camera params
+\u2502   \u251c\u2500\u2500 displacement.py      \u2190 crop DEM, write disp_meta.json
+\u2502   \u2514\u2500\u2500 color.py             \u2190 stitch WAC Hapke tiles into color_patch.png
+\u2502
+\u251c\u2500\u2500 render/                  \u2190 Blender scene modules (Blender Python)
+\u2502   \u251c\u2500\u2500 scene.py             \u2190 clear_scene(), setup_renderer()
+\u2502   \u251c\u2500\u2500 terrain.py           \u2190 build_terrain_mesh(), build_terrain_material()
+\u2502   \u251c\u2500\u2500 camera.py            \u2190 place_camera()
+\u2502   \u251c\u2500\u2500 lighting.py          \u2190 place_sun()
+\u2502   \u2514\u2500\u2500 latlon.py            \u2190 per-pixel lat/lon map
+\u2502
+\u2514\u2500\u2500 utils/
+    \u251c\u2500\u2500 geo.py               \u2190 Moon geometry constants & shared helpers
+    \u251c\u2500\u2500 sphere.py            \u2190 local scene frame (MCMF \u2194 local)
+    \u2514\u2500\u2500 config.py            \u2190 load_config()
 ```
 
 ---
@@ -59,8 +55,7 @@ python_files/
 
 ```bash
 pip install Pillow numpy
-# GDAL (optional but recommended for better DEM cropping):
-sudo apt install gdal-bin
+sudo apt install gdal-bin   # recommended for better DEM cropping
 ```
 
 ### 2. Edit `config.json`
@@ -68,20 +63,16 @@ sudo apt install gdal-bin
 ```json
 {
   "camera": {
-    "lat_deg":    10.0,
-    "lon_deg":    45.0,
-    "height_km":  5.0,
-    "fov_deg":    75.0,
-    "tilt_deg":   0.0,
-    "azimuth_deg": 0.0
+    "lat_deg": 10.0, "lon_deg": 45.0, "height_km": 5.0,
+    "fov_deg": 75.0, "tilt_deg": 0.0, "azimuth_deg": 0.0
   },
   "sun": { "azimuth_deg": 135.0, "elevation_deg": 25.0, "strength": 5.0 },
   "render": { "width": 1920, "height": 1080, "samples": 256, "use_gpu": true },
   "paths": {
-    "lola_dem":   "/path/to/lunar_dem.tif",
-    "wac_dir":    "/path/to/color/",
-    "wac_ext":    ".tif",
-    "output_dir": "/path/to/python_files/output"
+    "lola_dem": "/path/to/lunar_dem.tif",
+    "wac_dir":  "/path/to/color/",
+    "wac_ext":  ".tif",
+    "output_dir": "/path/to/output"
   }
 }
 ```
@@ -89,11 +80,8 @@ sudo apt install gdal-bin
 ### 3. Run
 
 ```bash
-# Full pipeline (textures + render):
-bash run.sh
-
-# Custom config:
-bash run.sh --config /path/to/my_config.json
+bash run.sh                                          # full pipeline
+bash run.sh --config /path/to/my_config.json         # custom config
 
 # Steps individually:
 python3 prepare_textures.py --config config.json
@@ -102,54 +90,152 @@ blender --background --python lunar_render.py -- --config config.json
 
 ---
 
-## Batch rendering from a trajectory file
+## Scripts
 
-`batch_render.py` reads a **SelenITA coordinates file** (one row per second) and
-renders one image per selected row, automatically converting negative longitudes
-to the 0–360° convention.
+### `batch_render.py` \u2014 render a SelenITA trajectory
 
-### Usage
+Reads a SelenITA coordinates file (one row per second) and renders one image per selected row.
 
 ```bash
 python3 batch_render.py \
-    --input  ../real_data/SelenITA_CoordinatesMoon_Operational_70km.txt \
-    [--config  config.json]           # base config — lat/lon/alt overridden per row
-    [--output  output/batch_70km]     # defaults to output/batch
-    [--blender blender]               # Blender executable
-    [--interval N]                    # render every Nth second (default: 1)
-    [--limit N]                       # stop after N rendered images
+    --input    real_data/SelenITA_CoordinatesMoon_Operational_70km.txt \
+    --config   config.json \
+    --output   output/batch_70km \
+    --blender  blender \
+    --interval 60 \
+    --limit    300
 ```
 
-### Examples
+| Argument | Default | Description |
+|---|---|---|
+| `--input` | required | SelenITA .txt trajectory file |
+| `--config` | `config.json` | Base config (lat/lon/alt overridden per row) |
+| `--output` | `output/batch/<auto>` | Output root directory |
+| `--blender` | `blender` | Blender executable |
+| `--interval N` | `1` | Render every Nth row |
+| `--limit N` | \u2014 | Stop after N images |
+
+Output naming: timestamp `5 Feb 2029 00:01:00` \u2192 `00_01_00-20290205`.
+
+---
+
+### `random_render.py` \u2014 synthetic dataset generation
+
+Renders N images with randomised orbital and solar parameters.
 
 ```bash
-# One image per minute, first 10 images only (quick test):
-python3 batch_render.py \
-    --input ./real_data/SelenITA_CoordinatesMoon_Commissioning.txt \
-    --interval 60 --limit 300
-
-# Full dataset, one image every 5 minutes:
-python3 batch_render.py \
-    --input ./real_data/SelenITA_CoordinatesMoon_Operational_30km.txt \
-    --interval 300 \
-    --output output/batch_30km
+python3 random_render.py \
+    --n      100 \
+    --config config.json \
+    --output output/random \
+    --seed   42 \
+    --blender blender
 ```
 
-### Output structure
+| Argument | Default | Description |
+|---|---|---|
+| `--n` | required | Number of images to render |
+| `--config` | `config.json` | Base config |
+| `--output` | `output/random/<DEM>` | Output root directory |
+| `--seed` | \u2014 | Random seed for reproducibility |
+
+**Sampling ranges:** altitude 15\u2013150 km, latitude \u221260\u00b0\u2013+60\u00b0, longitude 0\u00b0\u2013360\u00b0, sun elevation 5\u00b0\u201315\u00b0, sun azimuth (relative) \u221245\u00b0\u2013+45\u00b0.
+
+Each JSON includes a `render_params` block with all values used.
+
+---
+
+### `annotate_craters.py` \u2014 crater circle overlay
+
+Draws crater circles from `craters_unified.parquet` on every image in a batch folder. Output goes to `<batch>/crater/`.
+
+```bash
+python3 annotate_craters.py \
+    --batch     output/batch/70km_SunAz248.0_SunInc10.0_FOV120.0_GLD100 \
+    --craters   craters_unified.parquet \
+    --min-diam  1.0 \
+    --color     0,0,255 \
+    --thickness 2 \
+    --offset-lat 0.0 \
+    --offset-lon 0.0
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--batch` | required | Batch folder (must contain `img/`, `json/`, `npz/`) |
+| `--craters` | `craters_unified.parquet` | Crater catalogue |
+| `--min-diam` | `0.0` | Skip craters smaller than N km |
+| `--color` | `0,0,255` | BGR circle colour |
+| `--thickness` | `2` | Line thickness in pixels |
+| `--offset-lat/lon` | `0.0` | Shift circles N/S or E/W in degrees |
+
+---
+
+### `plot_frames.py` \u2014 two-panel frame figures
+
+For every frame, generates a figure with a 3-D context sphere and the rendered image with km axes.
+
+```bash
+python3 plot_frames.py \
+    --batch       output/batch/<name> \
+    --coords-file real_data/SelenITA_CoordinatesMoon_Operational_70km.txt \
+    --config      config.json
+```
+
+Output: `<batch>/frames/<stem>.png`
+
+---
+
+### `plot_illustration.py` \u2014 orbital geometry illustration
+
+For every frame, generates a 2-D cross-section showing satellite altitude, FOV lines, and surface coverage arc.
+
+```bash
+python3 plot_illustration.py \
+    --batch       output/batch/<name> \
+    --coords-file real_data/SelenITA_CoordinatesMoon_Operational_70km.txt \
+    --config      config.json
+```
+
+Output: `<batch>/illustration/<stem>.png`
+
+---
+
+### `make_video.py` \u2014 timelapse video
+
+Assembles `frames/` PNGs into an MP4 using ffmpeg.
+
+```bash
+python3 make_video.py \
+    --batch output/batch/<name> \
+    --fps   5 \
+    --crf   18 \
+    --out   timelapse.mp4
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `--batch` | required | Batch folder (must contain `frames/`) |
+| `--fps` | `5.0` | Frames per second |
+| `--crf` | `18` | H.264 quality (0\u201351, lower = better) |
+| `--out` | `timelapse.mp4` | Output filename (placed inside `frames/`) |
+
+Requires ffmpeg: `sudo apt install ffmpeg`.
+
+---
+
+## Output structure
+
+All batch scripts write to the same layout:
 
 ```
 <output>/
-    img/   HH_MM_SS-YYYYMMDD.png    16-bit PNG render
-    json/  HH_MM_SS-YYYYMMDD.json   lat/lon corner summary
-    npz/   HH_MM_SS-YYYYMMDD.npz    per-pixel lat/lon arrays
+    img/   <stem>.png     16-bit PNG render
+    json/  <stem>.json    lat/lon corner summary  [+render_params for random_render]
+    npz/   <stem>.npz     per-pixel lat/lon arrays (H\u00d7W float32)
 ```
 
-Intermediate files (`disp_patch.tif`, `color_patch.png`, `disp_meta.json`, etc.)
-are **automatically deleted** after each frame to save disk space.
-
-### File naming
-
-The timestamp `1 Nov 2028 00:01:00.000` becomes `00_01_00-20281101`.
+Intermediate files are deleted automatically after each frame.
 
 ---
 
@@ -159,18 +245,18 @@ The timestamp `1 Nov 2028 00:01:00.000` becomes `00_01_00-20281101`.
 
 | Key | Type | Description |
 |---|---|---|
-| `lat_deg` | float | Latitude in degrees North (−90 to +90) |
-| `lon_deg` | float | Longitude in degrees East (**0 to 360**) |
-| `height_km` | float | Altitude above the terrain plane (km) |
+| `lat_deg` | float | Latitude \u00b0N (\u221290 to +90) |
+| `lon_deg` | float | Longitude \u00b0E (**0 to 360**) |
+| `height_km` | float | Altitude above terrain (km) |
 | `fov_deg` | float | Horizontal field of view (degrees) |
-| `tilt_deg` | float | Off-nadir tilt (0 = nadir look) |
+| `tilt_deg` | float | Off-nadir tilt (0 = nadir) |
 | `azimuth_deg` | float | Tilt direction (0=N, 90=E, 180=S, 270=W) |
 
 ### `sun`
 
 | Key | Type | Description |
 |---|---|---|
-| `azimuth_deg` | float | Sun direction (0=N, 90=E …) |
+| `azimuth_deg` | float | Sun direction (0=N, 90=E \u2026) |
 | `elevation_deg` | float | Sun angle above horizon |
 | `strength` | float | Cycles lamp energy (watts) |
 
@@ -178,42 +264,14 @@ The timestamp `1 Nov 2028 00:01:00.000` becomes `00_01_00-20281101`.
 
 | Key | Type | Description |
 |---|---|---|
-| `width` / `height` | int | Output image resolution in pixels |
-| `samples` | int | Cycles path-tracing samples |
-| `use_gpu` | bool | Enable GPU rendering (auto-detects CUDA/HIP) |
+| `width` / `height` | int | Output resolution in pixels |
+| `samples` | int | Path-tracing samples |
+| `use_gpu` | bool | GPU rendering (auto-detects CUDA/HIP) |
 
 ### `texture`
 
 | Key | Type | Description |
 |---|---|---|
-| `color_patch_size` | int | Color patch resolution (default 1024) |
-| `disp_patch_size` | int | Displacement patch size for PIL fallback (default 512) |
-
----
-
-## Outputs
-
-| File | Description |
-|---|---|
-| `output/lunar_render.png` | 16-bit PNG render |
-| `output/lunar_render_latlon.json` | Corner lat/lon summary |
-| `output/lunar_render_latlon.npz` | Per-pixel lat/lon arrays (H×W float32) |
-| `output/disp_meta.json` | Height range metadata for the displacement shader |
-
-### Reading the lat/lon map
-
-```python
-import numpy as np
-data = np.load("output/lunar_render_latlon.npz")
-lat = data["lat"]  # shape (H, W), NaN = sky
-lon = data["lon"]
-```
-
----
-
-## Notes
-
-- The terrain patch size is **computed automatically** from `height_km`, `fov_deg`, `tilt_deg`, and render aspect ratio — you never need to set it manually.
-- Negative longitudes must be converted: `lon_0360 = lon_negative + 360`. `batch_render.py` does this automatically.
-- Blender must be installed and the `blender` command must be on `$PATH` (install via `sudo snap install blender --classic`).
-- **GPU device selection** gracefully skips unavailable backends (e.g. OPTIX on systems without the OptiX SDK) and falls back to CUDA → HIP → CPU automatically.
+| `color_patch_size` | int | Colour patch resolution (default 1024) |
+| `disp_patch_size` | int | Displacement patch size \u2013 PIL fallback (default 512) |
+| `use_legacy_dem` | bool | Use SLDEM2015 (\u00b160\u00b0 only) instead of GLD100 |

@@ -32,19 +32,14 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
 
-# Moon radius in km – matches utils/geo.py / utils/sphere.py
-MOON_RADIUS_KM = 1737.4
-KM_PER_DEG_LAT = np.pi * MOON_RADIUS_KM / 180.0
+from utils.geo import MOON_RADIUS_KM, KM_PER_DEG_LAT, normalize_lon as normalize_lon_360  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def normalize_lon_360(lon):
-    """Map any longitude to [0, 360)."""
-    return lon % 360.0
 
 
 def _shift_lon(lon_arr, center_lon):
