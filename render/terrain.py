@@ -174,15 +174,21 @@ def build_terrain_material(plane, disp_path, color_path, disp_meta_path):
     links.new(disp_tex.outputs["Color"],         disp_node.inputs["Height"])
     links.new(disp_node.outputs["Displacement"], out.inputs["Displacement"])
 
-    # Path 2: bump for micro-detail normals
-    bump_node          = nodes.new("ShaderNodeBump")
-    bump_node.location = (200, 150)
-    bump_node.inputs["Strength"].default_value = 1.5
-    bump_node.inputs["Distance"].default_value = 0.01   # km ≈ 10 m
-    links.new(disp_tex.outputs["Color"],   bump_node.inputs["Height"])
-    links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
+    # Path 2: bump for micro-detail normals.
+    # Strength kept low (0.3) to avoid normal/shadow-ray mismatch that distorts
+    # shadow edges — the geometry displacement already handles large-scale relief.
+    # bump_node          = nodes.new("ShaderNodeBump")
+    # bump_node.location = (200, 150)
+    # bump_node.inputs["Strength"].default_value = 0.3
+    # bump_node.inputs["Distance"].default_value = 0.005  # km ≈ 5 m
+    # links.new(disp_tex.outputs["Color"],   bump_node.inputs["Height"])
+    # links.new(bump_node.outputs["Normal"], bsdf.inputs["Normal"])
 
     plane.data.materials.append(mat)
+
+    # Fix shadow terminator artifacts on displaced/bumped curved mesh.
+    # 0.3 is needed for a curved sphere with km-scale relief and grazing sunlight.
+    plane.cycles.shadow_terminator_offset = 0.3
 
     # Adaptive subdivision modifier
     subd                          = plane.modifiers.new(name="Subdivision", type="SUBSURF")

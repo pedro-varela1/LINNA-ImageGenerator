@@ -20,6 +20,69 @@ LOLA_LON_MIN          =   0.0
 LOLA_LON_MAX          = 360.0
 LOLA_BYTES_PER_SAMPLE = 4          # 32-bit IEEE float (PC_REAL)
 
+# ---------------------------------------------------------------------------
+# SLDEM2015 multi-tile catalogue  (use_legacy_dem = true)
+# Tile naming: sldem2015_256_{suffix}_float.tif
+# Values are float32 metres above the 1737.4 km reference sphere.
+# ---------------------------------------------------------------------------
+
+SLDEM_TILES = {
+    "0n_60n_000_120":  (  0,  60,   0, 120),
+    "0n_60n_120_240":  (  0,  60, 120, 240),
+    "0n_60n_240_360":  (  0,  60, 240, 360),
+    "60s_0s_000_120":  (-60,   0,   0, 120),
+    "60s_0s_120_240":  (-60,   0, 120, 240),
+    "60s_0s_240_360":  (-60,   0, 240, 360),
+}
+_SLDEM_BASENAME = "sldem2015_256_{suffix}_float"
+
+
+def find_sldem_tiles(lat_min, lat_max, lon_min, lon_max, sldem_dir):
+    """Return list of SLDEM2015 tile .tif paths whose coverage overlaps the patch."""
+    paths = []
+    for suffix, (tlat_min, tlat_max, tlon_min, tlon_max) in SLDEM_TILES.items():
+        if tlat_max <= lat_min or tlat_min >= lat_max:
+            continue
+        if tlon_max <= lon_min or tlon_min >= lon_max:
+            continue
+        found = False
+        for ext in (".tif", ".TIF"):
+            p = os.path.join(sldem_dir, _SLDEM_BASENAME.format(suffix=suffix) + ext)
+            if os.path.isfile(p):
+                paths.append(p)
+                found = True
+                break
+        if not found:
+            print(f"[DISP] Warning: SLDEM tile not found for region {suffix}, skipping.")
+    if not paths:
+        raise FileNotFoundError(
+            f"No SLDEM tiles found for lat={lat_min}..{lat_max}, "
+            f"lon={lon_min}..{lon_max} in {sldem_dir}"
+        )
+    print(f"[DISP] Using {len(paths)} SLDEM tile(s)")
+    return paths
+
+
+def _get_sldem_min_max(tif_path):
+    """Read float32 min/max from a cropped SLDEM GeoTIFF (nodata excluded). Values are in km."""
+    if shutil.which("gdalinfo"):
+        result = subprocess.run(
+            ["gdalinfo", "-mm", tif_path], capture_output=True, text=True
+        )
+        m = re.search(r"Computed Min/Max=([-\d.]+),([-\d.]+)", result.stdout)
+        if m:
+            h_min, h_max = float(m.group(1)), float(m.group(2))
+            print(f"[DISP] Height range (gdalinfo): {h_min:.3f} .. {h_max:.3f} km")
+            return h_min, h_max
+    # PIL fallback: exclude nodata (-3.4e38 region)
+    arr = np.array(Image.open(tif_path), dtype=np.float32)
+    valid = arr[arr > -9000]
+    if valid.size == 0:
+        return -2.0, 2.0
+    h_min, h_max = float(valid.min()), float(valid.max())
+    print(f"[DISP] Height range (PIL): {h_min:.3f} .. {h_max:.3f} km")
+    return h_min, h_max
+
 
 def _crop_lola_with_gdal(img_path, lat_min, lat_max, lon_min, lon_max, out_path):
     """Crop LOLA GeoTIFF with gdal_translate using a manually computed pixel window."""
@@ -89,31 +152,52 @@ def _crop_lola_raw(img_path, lat_min, lat_max, lon_min, lon_max,
     return tif_path, h_min, h_max
 
 
-def _prepare_displacement_legacy(lola_img_path, lat_min, lat_max, lon_min, lon_max,
+def _prepare_displacement_legacy(lola_dem_dir, lat_min, lat_max, lon_min, lon_max,
                                   out_dir, disp_patch_size):
     """
-    Legacy pipeline: crop SLDEM2015/LOLA .IMG or GeoTIFF with manual pixel
-    arithmetic (gdal_translate -srcwin).  Returns (tif_path, meta_dict).
+    Legacy pipeline: mosaic SLDEM2015 256-ppd tiles with gdalwarp.
+    Returns (tif_path, meta_dict).
+
+    Elevation values in the tiles are float32 kilometres (UNIT=KILOMETER per
+    PDS label).  scale=1.0 is used so Blender interprets them directly in km.
     """
+    tile_paths = find_sldem_tiles(lat_min, lat_max, lon_min, lon_max, lola_dem_dir)
     out_path = os.path.join(out_dir, "disp_patch.tif")
 
-    if shutil.which("gdal_translate"):
-        _crop_lola_with_gdal(lola_img_path, lat_min, lat_max, lon_min, lon_max, out_path)
-        h_min, h_max = _get_lola_min_max(out_path)
-    else:
-        print("[DISP] gdal_translate not found — using raw binary fallback.")
-        out_path, h_min, h_max = _crop_lola_raw(
-            lola_img_path, lat_min, lat_max, lon_min, lon_max,
-            out_path, disp_patch_size,
-        )
+    lon_min_p = lon_min % 360.0
+    lon_max_p = lon_max % 360.0
+    if lon_max_p < lon_min_p:
+        lon_max_p += 360.0
 
-    h_mid = (h_max + h_min) / 2.0
-    meta  = {
-        "h_min_km": h_min,
-        "h_max_km": h_max,
-        "h_mid_km": h_mid,
-        "scale":    1.0,
-        "midlevel": h_mid,
+    x_min = lon_min_p * DEG_TO_M
+    x_max = lon_max_p * DEG_TO_M
+    y_min = lat_min   * DEG_TO_M
+    y_max = lat_max   * DEG_TO_M
+
+    cmd = [
+        "gdalwarp",
+        "-t_srs", MOON_EQC_SRS,
+        "-te",    str(x_min), str(y_min), str(x_max), str(y_max),
+        "-ts",    str(disp_patch_size), str(disp_patch_size),
+        "-r",     "bilinear",
+        "-dstnodata", "-3.4028235e+38",
+        "-overwrite",
+    ] + tile_paths + [out_path]
+
+    print(f"[DISP] gdalwarp: {len(tile_paths)} SLDEM tile(s) → {os.path.basename(out_path)}")
+    subprocess.run(cmd, check=True)
+    print(f"[DISP] Saved → {out_path}")
+
+    # SLDEM values are in km (UNIT = KILOMETER per PDS label).
+    h_min_km, h_max_km = _get_sldem_min_max(out_path)
+    h_mid_km = (h_min_km + h_max_km) / 2.0
+
+    meta = {
+        "h_min_km": h_min_km,
+        "h_max_km": h_max_km,
+        "h_mid_km": h_mid_km,
+        "scale":    1.0,       # raw TIF values are already in km (Blender scene units)
+        "midlevel": h_mid_km,  # mean elevation in km (Displacement Midlevel)
     }
     return out_path, meta
 
@@ -301,15 +385,16 @@ def get_disp_min_max(tif_path):
 def prepare_displacement(gld100_dir, lat_min, lat_max, lon_min, lon_max,
                          out_dir, disp_patch_size=512, disp_scale_km=5.0,
                          dem_ext=".TIF", use_legacy_dem=False,
-                         lola_img_path=None):
+                         lola_dem_dir=None):
     """
     Crop the DEM patch and write disp_meta.json for the Blender material.
 
-    When ``use_legacy_dem=True`` the old SLDEM2015/LOLA pipeline is used:
-        • ``lola_img_path`` must point to the single .IMG or GeoTIFF file
-        • pixel coordinates are computed manually with -srcwin
-        • disp_meta stores real km values (scale=1, midlevel=h_mid_km)
-    When ``use_legacy_dem=False`` (default) the new GLD100 pipeline is used:
+    When ``use_legacy_dem=True`` the SLDEM2015 multi-tile pipeline is used:
+        • ``lola_dem_dir`` must point to the directory containing the
+          sldem2015_256_*_float.tif tiles (256 ppd)
+        • tiles are mosaiced with gdalwarp to the requested patch extent
+        • disp_meta stores km values (scale=0.001, midlevel=raw_metres)
+    When ``use_legacy_dem=False`` (default) the GLD100 pipeline is used:
         • ``gld100_dir`` must point to the directory of WAC_GLD100_*_100M.TIF
         • GDAL reads the embedded CRS geotransform; polar tiles are reprojected
         • disp_meta stores normalised values (scale=disp_scale_km, midlevel=0..1)
@@ -319,13 +404,13 @@ def prepare_displacement(gld100_dir, lat_min, lat_max, lon_min, lon_max,
     out_path = os.path.join(out_dir, "disp_patch.tif")
 
     if use_legacy_dem:
-        if not lola_img_path:
+        if not lola_dem_dir:
             raise ValueError(
-                "use_legacy_dem=True requires paths.lola_dem to be set in config."
+                "use_legacy_dem=True requires paths.lola_dem_dir to be set in config."
             )
-        print("[DISP] Using legacy LOLA/SLDEM2015 pipeline")
+        print("[DISP] Using SLDEM2015 multi-tile pipeline")
         out_path, meta = _prepare_displacement_legacy(
-            lola_img_path, lat_min, lat_max, lon_min, lon_max,
+            lola_dem_dir, lat_min, lat_max, lon_min, lon_max,
             out_dir, disp_patch_size,
         )
     else:

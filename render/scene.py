@@ -1,4 +1,5 @@
 import bpy
+import os
 
 
 def clear_scene():
@@ -28,6 +29,25 @@ def setup_renderer(render_width, render_height, render_samples,
 
     scene.view_settings.view_transform = "Filmic"
     # scene.view_settings.exposure       = 10.0
+
+    # Better shadow ray sampling (Blender 3.5+)
+    scene.cycles.use_light_tree = True
+
+    # Finer adaptive tessellation at render time — reduces staircase shadow edges.
+    # Default is 1.0 px/polygon; 0.5 doubles precision along each axis.
+    scene.cycles.dicing_rate         = 0.5
+    scene.cycles.offscreen_dicing_scale = 4.0
+
+    # Denoise the final render — removes residual shadow noise
+    scene.cycles.use_denoising          = True
+    scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
+    _nvoptix = "/usr/share/nvidia/nvoptix.bin"
+    if os.path.isfile(_nvoptix):
+        scene.cycles.denoiser = "OPTIX"
+        print("[Renderer] Denoiser: OPTIX")
+    else:
+        scene.cycles.denoiser = "OPENIMAGEDENOISE"
+        print("[Renderer] Denoiser: OPENIMAGEDENOISE")
 
     if use_gpu:
         prefs = bpy.context.preferences.addons["cycles"].preferences

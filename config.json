@@ -10,7 +10,7 @@
   "sun": {
     "azimuth_deg": 248.0,
     "elevation_deg": 10.0,
-    "strength": 10.0
+    "strength": 7.0
   },
   "render": {
     "width": 512,
@@ -21,7 +21,7 @@
   "paths": {
     "gld100_dem_dir": "/home/pedro-varela/Documents/TIF_DEM/",
     "dem_ext": ".TIF",
-    "lola_dem": "/home/pedro-varela/Documents/bleder_sim/lunar_dem.tif",
+    "lola_dem_dir": "/home/pedro-varela/Documents/SLDEM",
     "wac_dir": "/home/pedro-varela/Documents/TIF_COLOR/",
     "wac_ext": ".TIF",
     "output_dir": "/home/pedro-varela/Documents/LINNA-ImageGenerator/output"
