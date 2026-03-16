@@ -62,8 +62,8 @@ def parse_args():
     p.add_argument(
         "--max-diam",
         type=float,
-        default=20.0,
-        help="Maximum crater diameter in km (default: 20.0)",
+        default=80.0,
+        help="Maximum crater diameter in km (default: 80.0)",
     )
     p.add_argument(
         "--class-id",
