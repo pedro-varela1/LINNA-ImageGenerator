@@ -25,6 +25,8 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 import cv2
 import matplotlib.pyplot as plt
@@ -255,6 +257,49 @@ def write_labels(label_txt_path, label_meta_path, labels, stem, image_w, image_h
         json.dump(payload, f, indent=2)
 
 
+def process_single_image(task_data):
+    """
+    Process a single image in a thread. Returns task result dict.
+    task_data: (fname, img_dir, json_dir, npz_dir, label_dir, craters_df, class_id, min_diam, max_diam)
+    """
+    fname, img_dir, json_dir, npz_dir, label_dir, craters_df, class_id, min_diam, max_diam = task_data
+    
+    stem = os.path.splitext(fname)[0]
+    img_path = os.path.join(img_dir, fname)
+    json_path = os.path.join(json_dir, f"{stem}.json")
+    npz_path = os.path.join(npz_dir, f"{stem}.npz")
+
+    if not os.path.isfile(json_path) or not os.path.isfile(npz_path):
+        return {"fname": fname, "stem": stem, "status": "skip", "labels": [], "count": 0}
+
+    try:
+        labels, h, w = build_labels_for_image(
+            img_path,
+            npz_path,
+            json_path,
+            craters_df,
+            class_id,
+            min_diam,
+            max_diam,
+        )
+
+        label_txt_path = os.path.join(label_dir, f"{stem}.txt")
+        label_meta_path = os.path.join(label_dir, f"{stem}.meta.json")
+        write_labels(label_txt_path, label_meta_path, labels, stem, w, h)
+
+        return {
+            "fname": fname,
+            "stem": stem,
+            "status": "ok",
+            "labels": labels,
+            "count": len(labels),
+            "img_path": img_path,
+        }
+    except Exception as e:
+        print(f"  [ERROR] {stem}: {e}")
+        return {"fname": fname, "stem": stem, "status": "error", "labels": [], "count": 0}
+
+
 def plot_examples(example_items, label_dir, n_examples=3):
     """Plot and save a figure with up to n_examples annotated images."""
     if not example_items:
@@ -346,53 +391,63 @@ def main():
     print(f"Label: {label_dir}")
     print(f"Diameter filter: {args.min_diam:.1f} .. {args.max_diam:.1f} km")
     print(f"Images: {len(img_files)}")
+    print(f"Using ThreadPoolExecutor for parallel processing...")
     print()
 
     total_labels = 0
     processed = 0
     example_items = []
-    examples_plotted = False
+    print_lock = Lock()
+    example_lock = Lock()
 
-    for fname in img_files:
-        stem = os.path.splitext(fname)[0]
-        img_path = os.path.join(img_dir, fname)
-        json_path = os.path.join(json_dir, f"{stem}.json")
-        npz_path = os.path.join(npz_dir, f"{stem}.npz")
+    # Prepare task data for worker threads
+    tasks = [
+        (fname, img_dir, json_dir, npz_dir, label_dir, craters_df, args.class_id, args.min_diam, args.max_diam)
+        for fname in img_files
+    ]
 
-        if not os.path.isfile(json_path) or not os.path.isfile(npz_path):
-            print(f"  [SKIP] {stem} — missing json/npz")
-            continue
+    # Process images in parallel using ThreadPoolExecutor
+    n_workers = min(8, len(img_files))  # Use up to 8 threads
+    print(f"Processing {len(img_files)} images with {n_workers} workers...")
+    print()
 
-        labels, h, w = build_labels_for_image(
-            img_path,
-            npz_path,
-            json_path,
-            craters_df,
-            args.class_id,
-            args.min_diam,
-            args.max_diam,
-        )
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        results = executor.map(process_single_image, tasks)
 
-        label_txt_path = os.path.join(label_dir, f"{stem}.txt")
-        label_meta_path = os.path.join(label_dir, f"{stem}.meta.json")
-        write_labels(label_txt_path, label_meta_path, labels, stem, w, h)
+        for result in results:
+            stem = result["stem"]
+            status = result["status"]
 
-        print(f"  {stem} -> {len(labels)} labels")
-        processed += 1
-        total_labels += len(labels)
+            if status == "skip":
+                with print_lock:
+                    print(f"  [SKIP] {stem} — missing json/npz")
+            elif status == "error":
+                # Error already printed in process_single_image
+                pass
+            else:  # status == "ok"
+                labels = result["labels"]
+                with print_lock:
+                    print(f"  {stem} -> {len(labels)} labels")
+                processed += 1
+                total_labels += len(labels)
 
-        if not examples_plotted and labels:
-            example_items.append({
-                "stem": stem,
-                "img_path": img_path,
-                "labels": labels,
-            })
-            if len(example_items) == args.examples:
-                plot_examples(example_items, label_dir, n_examples=args.examples)
-                examples_plotted = True
+                # Collect examples for plotting at the end
+                if labels and len(example_items) < args.examples:
+                    with example_lock:
+                        if len(example_items) < args.examples:
+                            example_items.append({
+                                "stem": stem,
+                                "img_path": result["img_path"],
+                                "labels": labels,
+                            })
 
     print()
     print(f"=== Labels done: {processed} imagens, {total_labels} crateras rotuladas ===")
+    print()
+
+    # Plot examples at the end
+    if example_items:
+        plot_examples(example_items, label_dir, n_examples=len(example_items))
 
 
 if __name__ == "__main__":
