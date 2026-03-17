@@ -74,8 +74,8 @@ def parse_args():
     p.add_argument(
         "--examples",
         type=int,
-        default=3,
-        help="Number of visual examples to plot at the end (default: 3)",
+        default=5,
+        help="Number of visual examples to plot at the beginning (default: 5)",
     )
     return p.parse_args()
 
@@ -179,6 +179,10 @@ def build_labels_for_image(img_path, npz_path, json_path, craters_df, class_id, 
         return [], h, w
 
     tree, rows_v, cols_v, center_lat, center_lon, cos_lat_c = build_pixel_tree(lat_map, lon_map)
+    
+    valid_lats = lat_map[valid_mask]
+    lat_range_px = float(valid_lats.max() - valid_lats.min())
+    px_deg = lat_range_px / h
 
     labels = []
     for _, row in subset.iterrows():
@@ -189,7 +193,12 @@ def build_labels_for_image(img_path, npz_path, json_path, craters_df, class_id, 
 
         rel_lat = lat_c - center_lat
         rel_lon = _shift_lon(lon_c, center_lon) * cos_lat_c
-        _, idx = tree.query([[rel_lat, rel_lon]], k=1)
+        dist, idx = tree.query([[rel_lat, rel_lon]], k=1)
+        
+        # Check if crater is actually inside the image mapping
+        if dist[0] > 1.5 * px_deg:
+            continue
+
         px_row = int(rows_v[idx[0]])
         px_col = int(cols_v[idx[0]])
 
@@ -290,10 +299,12 @@ def plot_examples(example_items, label_dir, n_examples=3):
             ax.add_patch(c)
 
     fig.tight_layout()
-    out_plot = os.path.join(label_dir, "examples_3.png")
+    out_plot = os.path.join(label_dir, f"examples_{n_examples}.png")
     fig.savefig(out_plot, dpi=160)
-    plt.close(fig)
     print(f"[PLOT] Saved examples figure: {out_plot}")
+    print("[INFO] Showing examples. Please close the plot window to continue with the whole dataset.")
+    plt.show()
+    plt.close(fig)
 
 
 def main():
@@ -334,6 +345,7 @@ def main():
     total_labels = 0
     processed = 0
     example_items = []
+    examples_plotted = False
 
     for fname in img_files:
         stem = os.path.splitext(fname)[0]
@@ -363,17 +375,18 @@ def main():
         processed += 1
         total_labels += len(labels)
 
-        if len(example_items) < args.examples and labels:
+        if not examples_plotted and labels:
             example_items.append({
                 "stem": stem,
                 "img_path": img_path,
                 "labels": labels,
             })
+            if len(example_items) == args.examples:
+                plot_examples(example_items, label_dir, n_examples=args.examples)
+                examples_plotted = True
 
     print()
     print(f"=== Labels done: {processed} imagens, {total_labels} crateras rotuladas ===")
-
-    plot_examples(example_items, label_dir, n_examples=args.examples)
 
 
 if __name__ == "__main__":
