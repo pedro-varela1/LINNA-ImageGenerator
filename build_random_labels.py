@@ -262,10 +262,12 @@ def plot_examples(example_items, label_dir, n_examples=3):
         return
 
     n = min(n_examples, len(example_items))
-    fig, axes = plt.subplots(1, n, figsize=(6 * n, 6), squeeze=False)
+    n_cols = min(n, 5)
+    n_rows = (n + 4) // 5
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 6 * n_rows), squeeze=False)
 
     for i in range(n):
-        ax = axes[0, i]
+        ax = axes[i // n_cols, i % n_cols]
         item = example_items[i]
         img = cv2.imread(item["img_path"], cv2.IMREAD_UNCHANGED)
         if img is None:
@@ -297,6 +299,10 @@ def plot_examples(example_items, label_dir, n_examples=3):
                 edgecolor="cyan",
             )
             ax.add_patch(c)
+
+    # Ocultar painéis que sobrarem se n_examples não for múltiplo de 5
+    for i in range(n, n_rows * n_cols):
+        axes[i // n_cols, i % n_cols].axis("off")
 
     fig.tight_layout()
     out_plot = os.path.join(label_dir, f"examples_{n_examples}.png")
